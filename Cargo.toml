@@ -1,0 +1,15 @@
+[package]
+name = "code_adv_soft_rast"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "code_adv_soft_rast_lib"
+
+[dependencies]
+rand = "0.9.1"
+rand_xorshift = "0.4.0"
+winit = { version = "0.30.11"}
+softbuffer = "0.4.6"
+nalgebra = { version = "0.33.2" }
