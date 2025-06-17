@@ -8,6 +8,7 @@ use nalgebra::{Isometry3, Matrix4, Point2, Point3, Vector, Vector2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use softbuffer::{Context, Surface};
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::ops::Div;
 use std::rc::Rc;
@@ -17,8 +18,8 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::NamedKey;
-use winit::window::{Window, WindowId};
+use winit::keyboard::{Key, KeyCode, NamedKey, SmolStr};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 const WIDTH: f32 = 1600.0;
 const HEIGHT: f32 = 900.0;
@@ -26,6 +27,7 @@ const HEIGHT: f32 = 900.0;
 pub enum SoftRastEvent<'a> {
     Resume {},
     Update {
+        input: InputState,
         delta: Duration,
     },
     Render {
@@ -62,7 +64,28 @@ impl Default for Command {
         }
     }
 }
+#[derive(Default, Clone)]
+struct InputState {
+    pressed_keys: HashSet<String>,
+    mouse_dx: f64,
+    mouse_dy: f64,
+}
 
+impl InputState {
+    fn new() -> Self {
+        Self {
+            pressed_keys: HashSet::new(),
+            mouse_dx: 0.0,
+            mouse_dy: 0.0,
+        }
+    }
+
+    // Optional: Reset mouse motion deltas at the start of each frame
+    fn reset_mouse_motion(&mut self) {
+        self.mouse_dx = 0.0;
+        self.mouse_dy = 0.0;
+    }
+}
 struct AppContext {
     user_state: Box<dyn UserState>,
     window: Option<Rc<Window>>,
@@ -72,6 +95,9 @@ struct AppContext {
     command: Command,
     scene: Option<Scene>,
     timer: Instant,
+    input: InputState,
+    mouse_last_pos: (f64, f64),
+    mouse_pos: (f64, f64),
 }
 impl AppContext {
     pub fn new(user_state: impl UserState + 'static) -> Self {
@@ -84,6 +110,9 @@ impl AppContext {
             command: Command::default(),
             scene: None,
             timer: Instant::now(),
+            input: InputState::default(),
+            mouse_last_pos: (0.0, 0.0),
+            mouse_pos: (0.0, 0.0),
         }
     }
 }
@@ -131,6 +160,8 @@ impl ApplicationHandler for AppContext {
             .unwrap()
             .request_inner_size(PhysicalSize::new(WIDTH, HEIGHT));
 
+        self.window.as_ref().unwrap().set_cursor_grab(CursorGrabMode::Confined).expect("TODO: panic message");
+        
         self.user_state
             .handle_event(&mut self.command, SoftRastEvent::Resume {});
     }
@@ -147,6 +178,7 @@ impl ApplicationHandler for AppContext {
         }
 
         self.command.commands.clear();
+
 
         match event {
             WindowEvent::Resized(size) => {
@@ -176,6 +208,17 @@ impl ApplicationHandler for AppContext {
                     (size.width, size.height)
                 };
 
+                self.user_state.handle_event(
+                    &mut self.command,
+                    SoftRastEvent::Update {
+                        delta,
+                        input: self.input.clone(),
+                    },
+                );
+
+                self.input.mouse_dy = 0.0;
+                self.input.mouse_dx = 0.0;
+
                 let mut buffer = surface.buffer_mut().unwrap();
                 buffer.fill(0u32);
                 if let Some(target) = &mut self.render_target {
@@ -190,9 +233,17 @@ impl ApplicationHandler for AppContext {
                         for entity in &scene.entities {
                             let transform = &entity.position;
                             for (vertices) in entity.model.vertices.chunks_exact(3) {
-                                let color = vertices[0].color.unwrap_or(Color::new(1.0,1.0,1.0,1.0).as_u32());
+                                let color = vertices[0]
+                                    .color
+                                    .unwrap_or(Color::new(1.0, 1.0, 1.0, 1.0).as_u32());
                                 let mut verts = vertices.to_owned();
-                                draw_triangle_buffer(target, transform, verts.as_mut(), &scene.camera, color)
+                                draw_triangle_buffer(
+                                    target,
+                                    transform,
+                                    verts.as_mut(),
+                                    &scene.camera,
+                                    color,
+                                )
                             }
                         }
                     } else {
@@ -214,18 +265,46 @@ impl ApplicationHandler for AppContext {
                 ));
                 window.request_redraw();
             }
-            WindowEvent::KeyboardInput { event, .. } => match event.logical_key {
-                winit::keyboard::Key::Named(key) => match key {
-                    NamedKey::Escape => {
-                        event_loop.exit();
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } => {
+                if event.state.is_pressed() {
+                    match event.logical_key {
+                        Key::Named(name) => match name {
+                            NamedKey::Escape => {
+                                event_loop.exit();
+                            }
+                            _ => {}
+                        },
+                        Key::Character(ch) => {
+                            self.input.pressed_keys.insert(ch.to_string());
+                        }
+                        _ => {}
                     }
-                    NamedKey::F1 => {}
-                    NamedKey::F2 => {}
-                    _ => {}
-                },
-                _ => {}
-            },
-            _ => {}
+                } else {
+                    match event.logical_key {
+                        Key::Character(ch) => {
+                            self.input.pressed_keys.remove(ch.as_str());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_last_pos = self.mouse_pos;
+                let (dx, dy) = (
+                    position.x - self.mouse_last_pos.0,
+                    position.y - self.mouse_last_pos.1,
+                );
+                self.mouse_pos = (position.x, position.y);
+                self.input.mouse_dx = dx;
+                self.input.mouse_dy = dy;
+            }
+            _ => {
+
+            }
         }
     }
 }
@@ -277,7 +356,7 @@ fn draw_triangle_buffer(
     let depth_buffer = target.depth.as_mut_slice();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
-    
+
     let model_mat = transform.to_homogeneous();
     let view_mat = camera.get_view_matrix();
     let proj_mat = camera.get_perspective_matrix();
@@ -286,11 +365,22 @@ fn draw_triangle_buffer(
     let mut screen_vertices = Vec::with_capacity(vertices.len());
     for v in vertices.iter_mut() {
         let clip_v = mvp_mat * v.position.to_homogeneous();
-        let ndc_v = if clip_v.w != 0.0 {clip_v / clip_v.w } else {clip_v};
+        if clip_v.z < camera.near {return}
+        let ndc_v = if clip_v.w != 0.0 {
+            clip_v / clip_v.w
+        } else {
+            clip_v
+        };
         let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
         let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y; // Flip Y for screen coords
         let screen_z = ndc_v.z; // Keep Z for potential depth testing
         screen_vertices.push(Point3::new(screen_x, screen_y, screen_z));
+    }
+
+    for v in screen_vertices.iter() {
+        if !(0.0..WIDTH).contains(&v.x) || !(0.0..HEIGHT).contains(&v.y) {
+            return;
+        }
     }
 
     let triangle2d = Triangle2d::new(
@@ -298,15 +388,19 @@ fn draw_triangle_buffer(
         screen_vertices[1].xy(),
         screen_vertices[2].xy(),
     );
-    
+
     let bounds = triangle2d.bounds();
 
     for x in bounds.x_range() {
         for y in bounds.y_range() {
             let (in_triangle, weights) = triangle2d.contains(&Point2::new(x as f32, y as f32));
             if in_triangle {
-                let depths = Vector3::new(1.0 / screen_vertices[0].z, 1.0 / screen_vertices[1].z, 1.0 / screen_vertices[2].z);
-                let depth = 1.0 / depths.dot(&weights);
+                let depths = Vector3::new(
+                    if screen_vertices[0].z.abs() > 1e-6 { 1.0 / screen_vertices[0].z } else { 0.0 },
+                    if screen_vertices[1].z.abs() > 1e-6 { 1.0 / screen_vertices[1].z } else { 0.0 },
+                    if screen_vertices[2].z.abs() > 1e-6 { 1.0 / screen_vertices[2].z } else { 0.0 },
+                );
+                let depth = if depths.dot(&weights).abs() > 1e-6 { 1.0 / depths.dot(&weights) } else { 0.0 };
                 let idx = (y * screen_size.x as u32 + x) as usize;
                 if idx < (screen_size.x * screen_size.y) as usize {
                     if depth > depth_buffer[idx] {
@@ -320,7 +414,7 @@ fn draw_triangle_buffer(
     }
 }
 
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 struct Camera {
     pub fov: f32,
     pub eye: Point3<f32>,
@@ -331,7 +425,7 @@ struct Camera {
     pub far: f32,
 }
 impl Camera {
-    pub fn new(fov: f32, aspect_ratio: f32) -> Self { 
+    pub fn new(fov: f32, aspect_ratio: f32) -> Self {
         Self {
             fov: fov * (std::f32::consts::PI / 180.),
             aspect_ratio,
@@ -339,7 +433,7 @@ impl Camera {
         }
     }
     pub fn get_view_matrix(&self) -> Matrix4<f32> {
-        Matrix4::look_at_rh(&self.eye,&self.target,&self.up)
+        Matrix4::look_at_rh(&self.eye, &self.target, &self.up)
     }
     pub fn get_perspective_matrix(&self) -> Matrix4<f32> {
         Matrix4::new_perspective(self.aspect_ratio, self.fov, self.near, self.far)
