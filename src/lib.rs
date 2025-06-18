@@ -72,15 +72,6 @@ struct InputState {
 }
 
 impl InputState {
-    fn new() -> Self {
-        Self {
-            pressed_keys: HashSet::new(),
-            mouse_dx: 0.0,
-            mouse_dy: 0.0,
-        }
-    }
-
-    // Optional: Reset mouse motion deltas at the start of each frame
     fn reset_mouse_motion(&mut self) {
         self.mouse_dx = 0.0;
         self.mouse_dy = 0.0;

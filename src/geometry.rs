@@ -1,6 +1,6 @@
-use crate::{Color, random_color};
-use nalgebra::{Matrix3, Matrix4, OMatrix, Point2, Point3, Vector2, Vector3};
-use rand::{SeedableRng, rng};
+use crate::random_color;
+use nalgebra::{Point2, Point3, Vector2, Vector3};
+use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::fs::read_to_string;
 use std::ops::RangeInclusive;
@@ -10,9 +10,6 @@ pub struct Model {
     pub vertices: Vec<Vertex>,
 }
 impl Model {
-    pub fn new() -> Self {
-        Self::from_vertices(&[])
-    }
     pub fn from_vertices(vertices: &[Vertex]) -> Model {
         Self {
             vertices: vertices.to_vec(),
@@ -194,26 +191,6 @@ impl Bounds {
             max_y: triangle.a.y.max(triangle.b.y.max(triangle.c.y)),
         }
     }
-    pub fn from_vertices(vertices: &[Vertex]) -> Bounds {
-        Bounds {
-            min_x: vertices[0]
-                .position
-                .x
-                .min(vertices[1].position.x.min(vertices[2].position.x)),
-            min_y: vertices[0]
-                .position
-                .y
-                .min(vertices[1].position.y.min(vertices[2].position.y)),
-            max_x: vertices[0]
-                .position
-                .x
-                .max(vertices[1].position.x.max(vertices[2].position.x)),
-            max_y: vertices[0]
-                .position
-                .y
-                .max(vertices[1].position.y.max(vertices[2].position.y)),
-        }
-    }
     pub fn x_range(&self) -> RangeInclusive<u32> {
         self.min_x as u32..=self.max_x as u32
     }
@@ -283,10 +260,5 @@ impl Vertex {
     pub fn with_uv(mut self, uv: Vector2<f32>) -> Self {
         self.uv = Some(uv);
         self
-    }
-    pub fn apply_matrix(&self, mat: &Matrix4<f32>) -> Self {
-        let mut vert = self.clone();
-        vert.position = mat.transform_point(&self.position);
-        vert
     }
 }
