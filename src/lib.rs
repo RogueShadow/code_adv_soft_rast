@@ -4,7 +4,7 @@ mod my_app;
 use crate::geometry::{Model, Vertex};
 use crate::my_app::MyApp;
 use geometry::Triangle2d;
-use nalgebra::{Isometry3, Matrix4, Point2, Point3, Unit, UnitQuaternion, Vector, Vector2, Vector3};
+use nalgebra::{Isometry3, Matrix4, Point2, Point3, Unit, UnitQuaternion, Vector2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use softbuffer::{Context, Surface};
@@ -297,7 +297,7 @@ impl ApplicationHandler for AppContext {
             }
         }
     }
-    fn device_event(&mut self, event_loop: &ActiveEventLoop, device_id: DeviceId, event: DeviceEvent) {
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: DeviceId, event: DeviceEvent) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 self.input.mouse_dx = delta.0;
@@ -364,7 +364,7 @@ fn draw_triangle_buffer(
     let mut screen_vertices = Vec::with_capacity(vertices.len());
     for v in vertices.iter_mut() {
         let clip_v = mvp_mat * v.position.to_homogeneous();
-        if clip_v.z < camera.near {return}
+        if clip_v.z < camera.near || clip_v.z > camera.far {return}
         let ndc_v = if clip_v.w != 0.0 {
             clip_v / clip_v.w
         } else {
