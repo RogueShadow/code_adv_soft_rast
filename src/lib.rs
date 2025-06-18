@@ -1,10 +1,10 @@
 mod geometry;
 mod my_app;
 
-use crate::geometry::{Bounds, Model, Vertex};
+use crate::geometry::{Model, Vertex};
 use crate::my_app::MyApp;
 use geometry::Triangle2d;
-use nalgebra::{Isometry3, Matrix4, Point2, Point3, Vector, Vector2, Vector3};
+use nalgebra::{Isometry3, Matrix4, Point2, Point3, Unit, UnitQuaternion, Vector, Vector2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use softbuffer::{Context, Surface};
@@ -16,9 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
+use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{Key, KeyCode, NamedKey, SmolStr};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 const WIDTH: f32 = 1600.0;
@@ -96,8 +96,6 @@ struct AppContext {
     scene: Option<Scene>,
     timer: Instant,
     input: InputState,
-    mouse_last_pos: (f64, f64),
-    mouse_pos: (f64, f64),
 }
 impl AppContext {
     pub fn new(user_state: impl UserState + 'static) -> Self {
@@ -111,8 +109,6 @@ impl AppContext {
             scene: None,
             timer: Instant::now(),
             input: InputState::default(),
-            mouse_last_pos: (0.0, 0.0),
-            mouse_pos: (0.0, 0.0),
         }
     }
 }
@@ -159,8 +155,9 @@ impl ApplicationHandler for AppContext {
             .as_ref()
             .unwrap()
             .request_inner_size(PhysicalSize::new(WIDTH, HEIGHT));
-
+        
         self.window.as_ref().unwrap().set_cursor_grab(CursorGrabMode::Confined).expect("TODO: panic message");
+        self.window.as_ref().unwrap().set_cursor_visible(false);
         
         self.user_state
             .handle_event(&mut self.command, SoftRastEvent::Resume {});
@@ -195,6 +192,10 @@ impl ApplicationHandler for AppContext {
                     )
                     .unwrap();
                 self.render_target = Some(RenderTarget::new(width, height));
+                if let Some(scene) = self.scene.as_mut() {
+                    scene.camera.aspect_ratio = width as f32 / height as f32;
+                }
+
                 window.set_title(&format!("Software Renderer Windowed {}x{}", width, height));
             }
             WindowEvent::CloseRequested => {
@@ -215,9 +216,8 @@ impl ApplicationHandler for AppContext {
                         input: self.input.clone(),
                     },
                 );
+                self.input.reset_mouse_motion();
 
-                self.input.mouse_dy = 0.0;
-                self.input.mouse_dx = 0.0;
 
                 let mut buffer = surface.buffer_mut().unwrap();
                 buffer.fill(0u32);
@@ -292,19 +292,18 @@ impl ApplicationHandler for AppContext {
                     }
                 }
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                self.mouse_last_pos = self.mouse_pos;
-                let (dx, dy) = (
-                    position.x - self.mouse_last_pos.0,
-                    position.y - self.mouse_last_pos.1,
-                );
-                self.mouse_pos = (position.x, position.y);
-                self.input.mouse_dx = dx;
-                self.input.mouse_dy = dy;
-            }
             _ => {
 
             }
+        }
+    }
+    fn device_event(&mut self, event_loop: &ActiveEventLoop, device_id: DeviceId, event: DeviceEvent) {
+        match event {
+            DeviceEvent::MouseMotion { delta } => {
+                self.input.mouse_dx = delta.0;
+                self.input.mouse_dy = delta.1;
+            }
+            _ => {}
         }
     }
 }
@@ -416,24 +415,70 @@ fn draw_triangle_buffer(
 
 #[derive(Debug, Copy, Clone)]
 struct Camera {
+    pub position: Point3<f32>,
+    pub orientation: UnitQuaternion<f32>,
     pub fov: f32,
-    pub eye: Point3<f32>,
-    pub target: Point3<f32>,
-    pub up: Vector3<f32>,
     pub aspect_ratio: f32,
     pub near: f32,
     pub far: f32,
 }
 impl Camera {
-    pub fn new(fov: f32, aspect_ratio: f32) -> Self {
+    pub fn new(
+        position: Point3<f32>,
+        target: Point3<f32>,
+        up: Vector3<f32>,
+        fov: f32,
+        aspect_ratio: f32,
+        near: f32,
+        far: f32,
+    ) -> Self {
+        let direction = (target - position).normalize();
+        let orientation = UnitQuaternion::face_towards(&direction, &up);
         Self {
-            fov: fov * (std::f32::consts::PI / 180.),
+            position,
+            orientation,
+            fov,
             aspect_ratio,
-            ..Default::default()
+            near,
+            far,
         }
     }
+    pub fn forward(&self) -> Vector3<f32> {
+        self.orientation * Vector3::new(0.0, 0.0, -1.0)
+    }
+    pub fn right(&self) -> Vector3<f32> {
+        self.orientation * Vector3::new(1.0, 0.0, 0.0)
+    }
+    pub fn up(&self) -> Vector3<f32> {
+        self.orientation * Vector3::new(0.0, 1.0, 0.0)
+    }
+    pub fn move_world(&mut self, displacement: Vector3<f32>) {
+        self.position += displacement;
+    }
+    pub fn move_local(&mut self, forward: f32, right: f32, up: f32) {
+        let forward_vector = self.forward() * forward;
+        let right_vector = self.right() * right;
+        let up_vector = self.up() * up;
+        self.position += forward_vector + right_vector + up_vector;
+    }
+    pub fn roll(&mut self, roll: f32) {
+        let forward = self.forward();
+        let roll_rot = UnitQuaternion::from_axis_angle(&Unit::new_normalize(forward), roll);
+        self.orientation = roll_rot * self.orientation;
+    }
+    pub fn look(&mut self, delta_x: f32, delta_y: f32, sensitivity: f32) {
+        let yaw = -delta_x * sensitivity;
+        let pitch = -delta_y * sensitivity;
+        
+        let yaw_rot = UnitQuaternion::from_axis_angle(&Unit::new_normalize(Vector3::new(0.0,1.0,0.0)), yaw);
+        let pitch_rot = UnitQuaternion::from_axis_angle(&Unit::new_normalize(Vector3::new(1.0,0.0,0.0)), pitch);
+        
+        self.orientation = self.orientation * pitch_rot * yaw_rot;
+    }
     pub fn get_view_matrix(&self) -> Matrix4<f32> {
-        Matrix4::look_at_rh(&self.eye, &self.target, &self.up)
+        let rotation_matrix = self.orientation.to_rotation_matrix();
+        let translation = Matrix4::new_translation(&(-self.position.coords));
+        rotation_matrix.to_homogeneous().try_inverse().unwrap() * translation
     }
     pub fn get_perspective_matrix(&self) -> Matrix4<f32> {
         Matrix4::new_perspective(self.aspect_ratio, self.fov, self.near, self.far)
@@ -441,15 +486,15 @@ impl Camera {
 }
 impl Default for Camera {
     fn default() -> Self {
-        Self {
-            fov: 60.0 * (std::f32::consts::PI / 180.),
-            eye: Point3::origin(),
-            target: Point3::origin() + Vector3::new(0., 0., 0.),
-            up: Vector3::y(),
-            aspect_ratio: 16.0 / 9.0,
-            near: 0.1,
-            far: 100.0,
-        }
+        Self::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, -1.0),
+            Vector3::new(0.0, 1.0, 0.0),
+            70.0,
+            16.0/9.0,
+            0.01,
+            100.0,
+        )
     }
 }
 
