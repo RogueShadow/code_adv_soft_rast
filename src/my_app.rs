@@ -10,7 +10,15 @@ impl Default for MyApp {
     fn default() -> Self {
         Self {
             models: vec![],
-            cam: Camera::new(Point3::origin(),Point3::origin(),Vector3::new(0.0,1.0,0.0),75.0,16./9.,0.01,100.0),
+            cam: Camera::new(
+                Point3::origin(),
+                Point3::origin(),
+                Vector3::new(0.0, 1.0, 0.0),
+                75.0,
+                16. / 9.,
+                0.01,
+                100.0,
+            ),
         }
     }
 }
@@ -19,7 +27,6 @@ impl UserState for MyApp {
         let time = command.elapsed().as_secs_f32();
         match event {
             SoftRastEvent::Render { delta, scene } => {
-
                 let transform = Isometry3::new(
                     Vector3::new(-1.0, 0.0, 0.0),
                     Vector3::new(3.14 + time.sin() * 0.7, 0.0, 0.0),
@@ -28,7 +35,6 @@ impl UserState for MyApp {
                     Vector3::new(1.0, 0.0, -0.0),
                     Vector3::new(0.0, time.sin(), 0.0),
                 );
-                
 
                 if scene.entities.is_empty() {
                     scene.camera.position = Point3::new(0.0, 0.0, -10.0);
@@ -43,7 +49,7 @@ impl UserState for MyApp {
                         self.models.first().unwrap(),
                         &transform2,
                     ));
-                } else {  
+                } else {
                     scene.camera = self.cam;
                     if let Some(entity) = scene
                         .entities

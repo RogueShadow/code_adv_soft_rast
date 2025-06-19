@@ -1,10 +1,12 @@
+mod camera;
 mod geometry;
 mod my_app;
 
+use crate::camera::Camera;
 use crate::geometry::{Model, Vertex};
 use crate::my_app::MyApp;
 use geometry::Triangle2d;
-use nalgebra::{Isometry3, Matrix4, Point2, Point3, Unit, UnitQuaternion, Vector2, Vector3};
+use nalgebra::{Isometry3, Point2, Point3, Vector2, Vector3, Vector4};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use softbuffer::{Context, Surface};
@@ -146,10 +148,14 @@ impl ApplicationHandler for AppContext {
             .as_ref()
             .unwrap()
             .request_inner_size(PhysicalSize::new(WIDTH, HEIGHT));
-        
-        self.window.as_ref().unwrap().set_cursor_grab(CursorGrabMode::Confined).expect("TODO: panic message");
+
+        self.window
+            .as_ref()
+            .unwrap()
+            .set_cursor_grab(CursorGrabMode::Confined)
+            .expect("TODO: panic message");
         self.window.as_ref().unwrap().set_cursor_visible(false);
-        
+
         self.user_state
             .handle_event(&mut self.command, SoftRastEvent::Resume {});
     }
@@ -166,7 +172,6 @@ impl ApplicationHandler for AppContext {
         }
 
         self.command.commands.clear();
-
 
         match event {
             WindowEvent::Resized(size) => {
@@ -209,7 +214,6 @@ impl ApplicationHandler for AppContext {
                 );
                 self.input.reset_mouse_motion();
 
-
                 let mut buffer = surface.buffer_mut().unwrap();
                 buffer.fill(0u32);
                 if let Some(target) = &mut self.render_target {
@@ -224,16 +228,12 @@ impl ApplicationHandler for AppContext {
                         for entity in &scene.entities {
                             let transform = &entity.position;
                             for (vertices) in entity.model.vertices.chunks_exact(3) {
-                                let color = vertices[0]
-                                    .color
-                                    .unwrap_or(Color::new(1.0, 1.0, 1.0, 1.0).as_u32());
                                 let mut verts = vertices.to_owned();
                                 draw_triangle_buffer(
                                     target,
                                     transform,
                                     verts.as_mut(),
                                     &scene.camera,
-                                    color,
                                 )
                             }
                         }
@@ -283,12 +283,15 @@ impl ApplicationHandler for AppContext {
                     }
                 }
             }
-            _ => {
-
-            }
+            _ => {}
         }
     }
-    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: DeviceId, event: DeviceEvent) {
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 self.input.mouse_dx = delta.0;
@@ -317,6 +320,14 @@ impl Color {
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Color {
         Color { r, g, b, a }
     }
+    pub fn interpolate(&self, b: &Color, c: &Color, weights: &Vector3<f32>) -> Color {
+        Color {
+            r: self.r * weights.x + b.r * weights.y + c.r * weights.z,
+            g: self.g * weights.x + b.g * weights.y + c.g * weights.z,
+            b: self.b * weights.x + b.b * weights.y + c.b * weights.z,
+            a: 1.0,
+        }
+    }
     pub fn as_u32(&self) -> u32 {
         let red = (self.r * 255.0) as u32;
         let green = (self.g * 255.0) as u32;
@@ -334,13 +345,21 @@ pub fn random_color(rng: &mut XorShiftRng) -> Color {
     )
 }
 
+fn draw_points_buffer(
+    target: &mut RenderTarget,
+    transform: &Isometry3<f32>,
+    vertices: &mut [Vertex],
+    camera: &Camera,
+    color: u32,
+) {
+}
+
 #[inline(always)]
 fn draw_triangle_buffer(
     target: &mut RenderTarget,
     transform: &Isometry3<f32>,
     vertices: &mut [Vertex],
     camera: &Camera,
-    color: u32,
 ) {
     let color_buffer = target.color.as_mut_slice();
     let depth_buffer = target.depth.as_mut_slice();
@@ -352,25 +371,21 @@ fn draw_triangle_buffer(
     let proj_mat = camera.get_perspective_matrix();
     let mvp_mat = proj_mat * view_mat * model_mat;
 
-    let mut screen_vertices = Vec::with_capacity(vertices.len());
-    for v in vertices.iter_mut() {
-        let clip_v = mvp_mat * v.position.to_homogeneous();
-        if clip_v.z < camera.near || clip_v.z > camera.far {return}
+    let mut screen_vertices = Vec::with_capacity(3);
+    let mut colors = vec![];
+    
+    for vertex in vertices {
+        let clip_v = mvp_mat * vertex.position.to_homogeneous();
         let ndc_v = if clip_v.w != 0.0 {
             clip_v / clip_v.w
         } else {
             clip_v
         };
         let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
-        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y; // Flip Y for screen coords
-        let screen_z = ndc_v.z; // Keep Z for potential depth testing
+        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
+        let screen_z = ndc_v.z;
         screen_vertices.push(Point3::new(screen_x, screen_y, screen_z));
-    }
-
-    for v in screen_vertices.iter() {
-        if !(0.0..WIDTH).contains(&v.x) || !(0.0..HEIGHT).contains(&v.y) {
-            return;
-        }
+        colors.push(vertex.color);
     }
 
     let triangle2d = Triangle2d::new(
@@ -378,7 +393,6 @@ fn draw_triangle_buffer(
         screen_vertices[1].xy(),
         screen_vertices[2].xy(),
     );
-
     let bounds = triangle2d.bounds();
 
     for x in bounds.x_range() {
@@ -386,106 +400,42 @@ fn draw_triangle_buffer(
             let (in_triangle, weights) = triangle2d.contains(&Point2::new(x as f32, y as f32));
             if in_triangle {
                 let depths = Vector3::new(
-                    if screen_vertices[0].z.abs() > 1e-6 { 1.0 / screen_vertices[0].z } else { 0.0 },
-                    if screen_vertices[1].z.abs() > 1e-6 { 1.0 / screen_vertices[1].z } else { 0.0 },
-                    if screen_vertices[2].z.abs() > 1e-6 { 1.0 / screen_vertices[2].z } else { 0.0 },
+                    if screen_vertices[0].z.abs() > 1e-6 {
+                        1.0 / screen_vertices[0].z
+                    } else {
+                        0.0
+                    },
+                    if screen_vertices[1].z.abs() > 1e-6 {
+                        1.0 / screen_vertices[1].z
+                    } else {
+                        0.0
+                    },
+                    if screen_vertices[2].z.abs() > 1e-6 {
+                        1.0 / screen_vertices[2].z
+                    } else {
+                        0.0
+                    },
                 );
-                let depth = if depths.dot(&weights).abs() > 1e-6 { 1.0 / depths.dot(&weights) } else { 0.0 };
+                let depth = if depths.dot(&weights).abs() > 1e-6 {
+                    1.0 / depths.dot(&weights)
+                } else {
+                    0.0
+                };
                 let idx = (y * screen_size.x as u32 + x) as usize;
                 if idx < (screen_size.x * screen_size.y) as usize {
                     if depth > depth_buffer[idx] {
                         continue;
                     }
-                    color_buffer[idx] = color;
+                    let color = colors[0].unwrap().interpolate(
+                        &colors[1].unwrap(),
+                        &colors[2].unwrap(),
+                        &weights,
+                    );
+                    color_buffer[idx] = color.as_u32();
                     depth_buffer[idx] = depth;
                 }
             }
         }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-struct Camera {
-    pub position: Point3<f32>,
-    pub orientation: UnitQuaternion<f32>,
-    pub fov: f32,
-    pub aspect_ratio: f32,
-    pub near: f32,
-    pub far: f32,
-}
-impl Camera {
-    pub fn new(
-        position: Point3<f32>,
-        target: Point3<f32>,
-        up: Vector3<f32>,
-        fov: f32,
-        aspect_ratio: f32,
-        near: f32,
-        far: f32,
-    ) -> Self {
-        let direction = (target - position).normalize();
-        let orientation = UnitQuaternion::face_towards(&direction, &up);
-        Self {
-            position,
-            orientation,
-            fov,
-            aspect_ratio,
-            near,
-            far,
-        }
-    }
-    pub fn forward(&self) -> Vector3<f32> {
-        self.orientation * Vector3::new(0.0, 0.0, -1.0)
-    }
-    pub fn right(&self) -> Vector3<f32> {
-        self.orientation * Vector3::new(1.0, 0.0, 0.0)
-    }
-    pub fn up(&self) -> Vector3<f32> {
-        self.orientation * Vector3::new(0.0, 1.0, 0.0)
-    }
-    pub fn move_world(&mut self, displacement: Vector3<f32>) {
-        self.position += displacement;
-    }
-    pub fn move_local(&mut self, forward: f32, right: f32, up: f32) {
-        let forward_vector = self.forward() * forward;
-        let right_vector = self.right() * right;
-        let up_vector = self.up() * up;
-        self.position += forward_vector + right_vector + up_vector;
-    }
-    pub fn roll(&mut self, roll: f32) {
-        let forward = self.forward();
-        let roll_rot = UnitQuaternion::from_axis_angle(&Unit::new_normalize(forward), roll);
-        self.orientation = roll_rot * self.orientation;
-    }
-    pub fn look(&mut self, delta_x: f32, delta_y: f32, sensitivity: f32) {
-        let yaw = -delta_x * sensitivity;
-        let pitch = -delta_y * sensitivity;
-        
-        let yaw_rot = UnitQuaternion::from_axis_angle(&Unit::new_normalize(Vector3::new(0.0,1.0,0.0)), yaw);
-        let pitch_rot = UnitQuaternion::from_axis_angle(&Unit::new_normalize(Vector3::new(1.0,0.0,0.0)), pitch);
-        
-        self.orientation = self.orientation * pitch_rot * yaw_rot;
-    }
-    pub fn get_view_matrix(&self) -> Matrix4<f32> {
-        let rotation_matrix = self.orientation.to_rotation_matrix();
-        let translation = Matrix4::new_translation(&(-self.position.coords));
-        rotation_matrix.to_homogeneous().try_inverse().unwrap() * translation
-    }
-    pub fn get_perspective_matrix(&self) -> Matrix4<f32> {
-        Matrix4::new_perspective(self.aspect_ratio, self.fov, self.near, self.far)
-    }
-}
-impl Default for Camera {
-    fn default() -> Self {
-        Self::new(
-            Point3::new(0.0, 0.0, 0.0),
-            Point3::new(0.0, 0.0, -1.0),
-            Vector3::new(0.0, 1.0, 0.0),
-            70.0,
-            16.0/9.0,
-            0.01,
-            100.0,
-        )
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::random_color;
+use crate::{Color, random_color};
 use nalgebra::{Point2, Point3, Vector2, Vector3};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
@@ -74,11 +74,6 @@ pub fn load_model(file: &str, random_colors: bool) -> Model {
 
     let mut rng = XorShiftRng::seed_from_u64(0);
     for face in faces {
-        let color = if random_colors {
-            Some(random_color(&mut rng).as_u32())
-        } else {
-            None
-        };
         match face.len() {
             3 => {
                 vertices.push(vertex_from_face(
@@ -86,21 +81,21 @@ pub fn load_model(file: &str, random_colors: bool) -> Model {
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
                 vertices.push(vertex_from_face(
                     &face[1],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
                 vertices.push(vertex_from_face(
                     &face[2],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
             }
             4 => {
@@ -109,21 +104,21 @@ pub fn load_model(file: &str, random_colors: bool) -> Model {
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
                 vertices.push(vertex_from_face(
                     &face[1],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
                 vertices.push(vertex_from_face(
                     &face[2],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
 
                 vertices.push(vertex_from_face(
@@ -131,21 +126,21 @@ pub fn load_model(file: &str, random_colors: bool) -> Model {
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
                 vertices.push(vertex_from_face(
                     &face[2],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
                 vertices.push(vertex_from_face(
                     &face[3],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    color,
+                    Some(random_color(&mut rng)),
                 ));
             }
             n => eprintln!("Unsupported face {} vertices", n),
@@ -160,7 +155,7 @@ pub fn vertex_from_face(
     pos: &[Point3<f32>],
     uv: &[Vector2<f32>],
     norm: &[Vector3<f32>],
-    color: Option<u32>,
+    color: Option<Color>,
 ) -> Vertex {
     let mut vertex = Vertex::new(pos[face.0 - 1]);
     if let Some(index) = face.1 {
@@ -241,7 +236,7 @@ pub fn perpendicular_vector(v: &Vector2<f32>) -> Vector2<f32> {
 pub struct Vertex {
     pub position: Point3<f32>,
     pub normal: Option<Vector3<f32>>,
-    pub color: Option<u32>,
+    pub color: Option<Color>,
     pub uv: Option<Vector2<f32>>,
 }
 impl Vertex {
