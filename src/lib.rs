@@ -3,7 +3,7 @@ mod geometry;
 mod my_app;
 
 use crate::camera::Camera;
-use crate::geometry::{Model, Vertex};
+use crate::geometry::{Bounds, Model, Vertex};
 use crate::my_app::MyApp;
 use geometry::Triangle2d;
 use nalgebra::{Isometry3, Point2, Point3, Vector2, Vector3, Vector4};
@@ -39,6 +39,11 @@ pub enum SoftRastEvent<'a> {
 }
 pub enum SoftRastCommand {
     SetTitle(String),
+    SetRenderingMode{
+        tris: bool,
+        wireframe: bool,
+        points: bool,
+    }
 }
 
 trait UserState {
@@ -53,6 +58,13 @@ impl Command {
     pub fn set_title(&mut self, title: &str) {
         self.commands
             .push(SoftRastCommand::SetTitle(title.to_owned()));
+    }
+    pub fn set_render_mode(&mut self, tris: bool, wireframe: bool, points: bool) {
+        self.commands.push(SoftRastCommand::SetRenderingMode {
+            tris,
+            wireframe,
+            points,
+        })
     }
     pub fn elapsed(&self) -> Duration {
         self.timer.elapsed()
@@ -89,6 +101,9 @@ struct AppContext {
     scene: Option<Scene>,
     timer: Instant,
     input: InputState,
+    draw_tris: bool,
+    draw_wireframe: bool,
+    draw_points: bool,
 }
 impl AppContext {
     pub fn new(user_state: impl UserState + 'static) -> Self {
@@ -102,6 +117,9 @@ impl AppContext {
             scene: None,
             timer: Instant::now(),
             input: InputState::default(),
+            draw_tris: true,
+            draw_wireframe: true,
+            draw_points: false,
         }
     }
 }
@@ -168,6 +186,13 @@ impl ApplicationHandler for AppContext {
                 SoftRastCommand::SetTitle(title) => {
                     window.set_title(&title);
                 }
+                SoftRastCommand::SetRenderingMode {
+                    tris,wireframe, points
+                } => {
+                    self.draw_tris = tris.to_owned();
+                    self.draw_wireframe = wireframe.to_owned();
+                    self.draw_points = points.to_owned();
+                }
             }
         }
 
@@ -229,12 +254,33 @@ impl ApplicationHandler for AppContext {
                             let transform = &entity.position;
                             for (vertices) in entity.model.vertices.chunks_exact(3) {
                                 let mut verts = vertices.to_owned();
-                                draw_triangle_buffer(
-                                    target,
-                                    transform,
-                                    verts.as_mut(),
-                                    &scene.camera,
-                                )
+                                if self.draw_tris {
+                                    draw_triangle_buffer(
+                                        target,
+                                        transform,
+                                        verts.as_mut(),
+                                        &scene.camera,
+                                    );
+                                }
+                                if self.draw_points {
+                                    draw_points_buffer(
+                                        target,
+                                        transform,
+                                        verts.as_mut(),
+                                        &scene.camera,
+                                        Color::new(0.0, 1.0, 0.0, 1.0).as_u32(),
+                                        2.0,
+                                    );
+                                }
+                                if self.draw_wireframe {
+                                    draw_wireframe_buffer(
+                                        target,
+                                        transform,
+                                        verts.as_mut(),
+                                        &scene.camera,
+                                        Color::new(0.0,0.0,1.0,1.0).as_u32(),
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -351,7 +397,46 @@ fn draw_points_buffer(
     vertices: &mut [Vertex],
     camera: &Camera,
     color: u32,
+    size: f32,
 ) {
+    let color_buffer = target.color.as_mut_slice();
+
+    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
+
+    let model_mat = transform.to_homogeneous();
+    let view_mat = camera.get_view_matrix();
+    let proj_mat = camera.get_perspective_matrix();
+    let mvp_mat = proj_mat * view_mat * model_mat;
+
+    for v in vertices {
+        let clip_v = mvp_mat * v.position.to_homogeneous();
+        let ndc_v = if clip_v.w != 0.0 {
+            clip_v / clip_v.w
+        } else {
+            clip_v
+        };
+        let screen_x = ((ndc_v.x + 1.0) * 0.5 * screen_size.x);
+        let screen_y = ((1.0 - ndc_v.y) * 0.5 * screen_size.y);
+        let screen_x_u = screen_x as u32;
+        let screen_y_u = screen_y as u32;
+        
+        let size_u = size.ceil() as u32;
+        if screen_x_u < size_u || screen_y_u < size_u {
+            return;
+        }
+        for x in screen_x_u - size_u..screen_x_u + size_u {
+            for y in screen_y_u - size_u..screen_y_u + size_u {
+                let idx = (y * screen_size.x as u32 + x) as usize;
+                if idx < (screen_size.x * screen_size.y) as usize {
+                    let test_pos = Point2::new(x as f32, y as f32);
+                    let pos = Point2::new(screen_x, screen_y);
+                    if (test_pos - pos).magnitude() < size {
+                        color_buffer[idx] = color;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[inline(always)]
@@ -361,7 +446,7 @@ fn draw_triangle_buffer(
     vertices: &mut [Vertex],
     camera: &Camera,
 ) {
-    let color_buffer = target.color.as_mut_slice();
+
     let depth_buffer = target.depth.as_mut_slice();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
@@ -373,7 +458,7 @@ fn draw_triangle_buffer(
 
     let mut screen_vertices = Vec::with_capacity(3);
     let mut colors = vec![];
-    
+
     for vertex in vertices {
         let clip_v = mvp_mat * vertex.position.to_homogeneous();
         let ndc_v = if clip_v.w != 0.0 {
@@ -394,7 +479,10 @@ fn draw_triangle_buffer(
         screen_vertices[2].xy(),
     );
     let bounds = triangle2d.bounds();
-
+    
+    
+    let color_buffer = target.color.as_mut_slice();
+    
     for x in bounds.x_range() {
         for y in bounds.y_range() {
             let (in_triangle, weights) = triangle2d.contains(&Point2::new(x as f32, y as f32));
@@ -435,6 +523,101 @@ fn draw_triangle_buffer(
                     depth_buffer[idx] = depth;
                 }
             }
+        }
+    }
+}
+#[inline(always)]
+fn draw_wireframe_buffer(
+    target: &mut RenderTarget,
+    transform: &Isometry3<f32>,
+    vertices: &mut [Vertex],
+    camera: &Camera,
+    color: u32,
+) {
+
+    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
+
+    let model_mat = transform.to_homogeneous();
+    let view_mat = camera.get_view_matrix();
+    let proj_mat = camera.get_perspective_matrix();
+    let mvp_mat = proj_mat * view_mat * model_mat;
+
+    let mut s_verts = Vec::with_capacity(3);
+    let mut colors = vec![];
+
+    for vertex in vertices.iter() {
+        let clip_v = mvp_mat * vertex.position.to_homogeneous();
+        let ndc_v = if clip_v.w != 0.0 {
+            clip_v / clip_v.w
+        } else {
+            clip_v
+        };
+        let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
+        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
+        let screen_z = ndc_v.z;
+        s_verts.push(Point3::new(screen_x, screen_y, screen_z));
+        colors.push(vertex.color);
+    }
+    
+    draw_line_buffer(target,&s_verts[0].xy(),&s_verts[1].xy(),color);
+    draw_line_buffer(target,&s_verts[1].xy(),&s_verts[2].xy(),color);
+    draw_line_buffer(target,&s_verts[2].xy(),&s_verts[0].xy(),color);
+}
+
+fn draw_line_buffer(
+    target: &mut RenderTarget,
+    p1: &Point2<f32>,
+    p2: &Point2<f32>,
+    color: u32,
+) {
+    let color_buffer = target.color.as_mut_slice();
+
+    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
+
+
+    let x0 = p1.x as i32;
+    let y0 = p1.y as i32;
+    let x1 = p2.x as i32;
+    let y1 = p2.y as i32;
+    let width = screen_size.x as usize;
+    let height = screen_size.y as usize;
+    
+    
+    let x0 = x0.clamp(0, width as i32 - 1);
+    let y0 = y0.clamp(0, height as i32 - 1);
+    let x1 = x1.clamp(0, width as i32 - 1);
+    let y1 = y1.clamp(0, height as i32 - 1);
+
+    let dx = (x1 - x0).abs();
+    let dy = -(y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    let mut x = x0;
+    let mut y = y0;
+
+    loop {
+        // Set pixel at (x, y) if within bounds
+        if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
+            let index = (y as usize * width + x as usize);
+            if index < color_buffer.len() {
+                color_buffer[index] = color;
+            }
+        }
+
+        if x == x1 && y == y1 {
+            break;
+        }
+
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
         }
     }
 }

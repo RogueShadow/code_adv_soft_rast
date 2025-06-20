@@ -100,6 +100,27 @@ impl UserState for MyApp {
                 if input.pressed_keys.contains("e") {
                     self.cam.roll(-speed);
                 }
+                if input.pressed_keys.contains("1") {
+                    command.set_render_mode(false,false,true);
+                }
+                if input.pressed_keys.contains("2") {
+                    command.set_render_mode(false,true,false);
+                }
+                if input.pressed_keys.contains("3") {
+                    command.set_render_mode(false,true,true);
+                }
+                if input.pressed_keys.contains("4") {
+                    command.set_render_mode(true,false,false);
+                }
+                if input.pressed_keys.contains("5") {
+                    command.set_render_mode(true,false,true);
+                }
+                if input.pressed_keys.contains("6") {
+                    command.set_render_mode(true,true,false);
+                }
+                if input.pressed_keys.contains("7") {
+                    command.set_render_mode(true,true,true);
+                }
             }
             SoftRastEvent::Resume {} => {
                 self.models.push(load_model("assets/monkey.obj", true));
