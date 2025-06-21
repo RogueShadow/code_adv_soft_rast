@@ -1,5 +1,5 @@
 use crate::{Color, random_color};
-use nalgebra::{Point2, Point3, Vector2, Vector3};
+use nalgebra::{Point2, Point3,Vector2, Vector3};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::fs::read_to_string;
@@ -181,12 +181,35 @@ pub struct Bounds {
     pub max_y: f32,
 }
 impl Bounds {
-    pub fn from_triangle(triangle: &Triangle2d) -> Bounds {
-        Bounds {
-            min_x: triangle.a.x.min(triangle.b.x.min(triangle.c.x)),
-            min_y: triangle.a.y.min(triangle.b.y.min(triangle.c.y)),
-            max_x: triangle.a.x.max(triangle.b.x.max(triangle.c.x)),
-            max_y: triangle.a.y.max(triangle.b.y.max(triangle.c.y)),
+    pub fn new<T: AsRef<[Point3<f32>]>>(points: T) -> Self {
+        let points = points.as_ref();
+        if points.is_empty() {
+            return Self {
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 0.0,
+                max_y: 0.0,
+            };
+        }
+
+        let first = points[0];
+        let mut min_x = first.x;
+        let mut min_y = first.y;
+        let mut max_x = first.x;
+        let mut max_y = first.y;
+
+        for point in points.iter().skip(1) {
+            min_x = min_x.min(point.x);
+            min_y = min_y.min(point.y);
+            max_x = max_x.max(point.x);
+            max_y = max_y.max(point.y);
+        }
+
+        Self {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
         }
     }
     pub fn x_range(&self) -> RangeInclusive<u32> {
@@ -197,32 +220,19 @@ impl Bounds {
     }
 }
 
-pub struct Triangle2d {
-    pub a: Point2<f32>,
-    pub b: Point2<f32>,
-    pub c: Point2<f32>,
-}
-impl Triangle2d {
-    pub fn new(a: Point2<f32>, b: Point2<f32>, c: Point2<f32>) -> Self {
-        Self { a, b, c }
-    }
-    pub fn contains(&self, p: &Point2<f32>) -> (bool, Vector3<f32>) {
-        let area_abp = signed_area(&self.a, &self.b, p);
-        let area_bcp = signed_area(&self.b, &self.c, p);
-        let area_cap = signed_area(&self.c, &self.a, p);
-        let in_triangle = area_abp >= 0.0 && area_bcp >= 0.0 && area_cap >= 0.0;
+pub fn point_in_triangle(a: &Point2<f32>, b: &Point2<f32>, c: &Point2<f32>, p: &Point2<f32>) -> (bool, Vector3<f32>) {
+    let area_abp = signed_area(&a, &b, p);
+    let area_bcp = signed_area(&b, &c, p);
+    let area_cap = signed_area(&c, &a, p);
+    let in_triangle = area_abp >= 0.0 && area_bcp >= 0.0 && area_cap >= 0.0;
 
-        let inv_area_sum = 1.0 / (area_abp + area_bcp + area_cap);
-        let weight_a = area_bcp * inv_area_sum;
-        let weight_b = area_cap * inv_area_sum;
-        let weight_c = area_abp * inv_area_sum;
-        let weights = Vector3::new(weight_a, weight_b, weight_c);
+    let inv_area_sum = 1.0 / (area_abp + area_bcp + area_cap);
+    let weight_a = area_bcp * inv_area_sum;
+    let weight_b = area_cap * inv_area_sum;
+    let weight_c = area_abp * inv_area_sum;
+    let weights = Vector3::new(weight_a, weight_b, weight_c);
 
-        (in_triangle, weights)
-    }
-    pub fn bounds(&self) -> Bounds {
-        Bounds::from_triangle(&self)
-    }
+    (in_triangle, weights)
 }
 pub fn signed_area(a: &Point2<f32>, b: &Point2<f32>, c: &Point2<f32>) -> f32 {
     let ac = c - a;

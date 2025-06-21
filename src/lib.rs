@@ -3,9 +3,8 @@ mod geometry;
 mod my_app;
 
 use crate::camera::Camera;
-use crate::geometry::{Model, Vertex};
+use crate::geometry::{point_in_triangle, Bounds, Model, Vertex};
 use crate::my_app::MyApp;
-use geometry::Triangle2d;
 use nalgebra::{Isometry3, Point2, Point3, Vector2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
@@ -151,10 +150,10 @@ impl RenderTarget {
 impl ApplicationHandler for AppContext {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
-            
+
             let mut attributes = WindowAttributes::default();
             attributes.inner_size = Some(Size::new(PhysicalSize::new(WIDTH, HEIGHT)));
-            
+
             let window = match event_loop.create_window(attributes) {
                 Ok(window) => {
                     Rc::new(window)
@@ -179,7 +178,7 @@ impl ApplicationHandler for AppContext {
                     panic!("{}", err);
                 }
             };
-            
+
             if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
                 eprintln!("{:?}", err);
             }
@@ -264,25 +263,24 @@ impl ApplicationHandler for AppContext {
                             &mut self.command,
                             SoftRastEvent::Render { delta, scene },
                         );
-
+                        let camera = &scene.camera;
                         for entity in &scene.entities {
                             let transform = &entity.position;
                             for vertices in entity.model.vertices.chunks_exact(3) {
-                                let mut verts = vertices.to_owned();
                                 if self.draw_tris {
                                     draw_triangle_buffer(
                                         target,
                                         transform,
-                                        verts.as_mut(),
-                                        &scene.camera,
+                                        camera,
+                                        vertices,
                                     );
                                 }
                                 if self.draw_points {
                                     draw_points_buffer(
                                         target,
                                         transform,
-                                        verts.as_mut(),
-                                        &scene.camera,
+                                        camera,
+                                        vertices,
                                         Color::new(0.0, 1.0, 0.0, 1.0).as_u32(),
                                         2.0,
                                     );
@@ -291,8 +289,8 @@ impl ApplicationHandler for AppContext {
                                     draw_wireframe_buffer(
                                         target,
                                         transform,
-                                        verts.as_mut(),
-                                        &scene.camera,
+                                        camera,
+                                        vertices,
                                         Color::new(0.0, 0.0, 1.0, 1.0).as_u32(),
                                     )
                                 }
@@ -368,7 +366,7 @@ impl ApplicationHandler for AppContext {
 
 pub fn run() {
     match EventLoop::new() {
-        Ok(event_loop) => { 
+        Ok(event_loop) => {
             match event_loop.run_app(&mut AppContext::new(MyApp::default())) {
                 Ok(_) => {}
                 Err(err) => {
@@ -421,8 +419,8 @@ pub fn random_color(rng: &mut XorShiftRng) -> Color {
 fn draw_points_buffer(
     target: &mut RenderTarget,
     transform: &Isometry3<f32>,
-    vertices: &mut [Vertex],
     camera: &Camera,
+    vertices: &[Vertex],
     color: u32,
     size: f32,
 ) {
@@ -430,12 +428,8 @@ fn draw_points_buffer(
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
 
-    let model_mat = transform.to_homogeneous();
-    let view_mat = camera.get_view_matrix();
-    let proj_mat = camera.get_perspective_matrix();
-    let mvp_mat = proj_mat * view_mat * model_mat;
-
     for v in vertices {
+        let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
         let clip_v = mvp_mat * v.position.to_homogeneous();
         let ndc_v = if clip_v.w != 0.0 {
             clip_v / clip_v.w
@@ -470,22 +464,18 @@ fn draw_points_buffer(
 fn draw_triangle_buffer(
     target: &mut RenderTarget,
     transform: &Isometry3<f32>,
-    vertices: &mut [Vertex],
     camera: &Camera,
+    vertices: &[Vertex],
 ) {
     let depth_buffer = target.depth.as_mut_slice();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
 
-    let model_mat = transform.to_homogeneous();
-    let view_mat = camera.get_view_matrix();
-    let proj_mat = camera.get_perspective_matrix();
-    let mvp_mat = proj_mat * view_mat * model_mat;
-
-    let mut screen_vertices = Vec::with_capacity(3);
+    let mut screen_v = Vec::with_capacity(3);
     let mut colors = vec![];
 
     for vertex in vertices {
+        let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
         let clip_v = mvp_mat * vertex.position.to_homogeneous();
         let ndc_v = if clip_v.w != 0.0 {
             clip_v / clip_v.w
@@ -495,36 +485,31 @@ fn draw_triangle_buffer(
         let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
         let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
         let screen_z = ndc_v.z;
-        screen_vertices.push(Point3::new(screen_x, screen_y, screen_z));
+        screen_v.push(Point3::new(screen_x, screen_y, screen_z));
         colors.push(vertex.color);
     }
-
-    let triangle2d = Triangle2d::new(
-        screen_vertices[0].xy(),
-        screen_vertices[1].xy(),
-        screen_vertices[2].xy(),
-    );
-    let bounds = triangle2d.bounds();
+    
+    let bounds = Bounds::new(&screen_v);
 
     let color_buffer = target.color.as_mut_slice();
 
     for x in bounds.x_range() {
         for y in bounds.y_range() {
-            let (in_triangle, weights) = triangle2d.contains(&Point2::new(x as f32, y as f32));
+            let (in_triangle, weights) = point_in_triangle(&screen_v[0].xy(), &screen_v[1].xy(), &screen_v[2].xy(), &Point2::new(x as f32, y as f32));
             if in_triangle {
                 let depths = Vector3::new(
-                    if screen_vertices[0].z.abs() > 1e-6 {
-                        1.0 / screen_vertices[0].z
+                    if screen_v[0].z.abs() > 1e-6 {
+                        1.0 / screen_v[0].z
                     } else {
                         0.0
                     },
-                    if screen_vertices[1].z.abs() > 1e-6 {
-                        1.0 / screen_vertices[1].z
+                    if screen_v[1].z.abs() > 1e-6 {
+                        1.0 / screen_v[1].z
                     } else {
                         0.0
                     },
-                    if screen_vertices[2].z.abs() > 1e-6 {
-                        1.0 / screen_vertices[2].z
+                    if screen_v[2].z.abs() > 1e-6 {
+                        1.0 / screen_v[2].z
                     } else {
                         0.0
                     },
@@ -556,21 +541,17 @@ fn draw_triangle_buffer(
 fn draw_wireframe_buffer(
     target: &mut RenderTarget,
     transform: &Isometry3<f32>,
-    vertices: &mut [Vertex],
     camera: &Camera,
+    vertices: &[Vertex],
     color: u32,
 ) {
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
 
-    let model_mat = transform.to_homogeneous();
-    let view_mat = camera.get_view_matrix();
-    let proj_mat = camera.get_perspective_matrix();
-    let mvp_mat = proj_mat * view_mat * model_mat;
-
-    let mut s_verts = Vec::with_capacity(3);
+    let mut screen_v = Vec::with_capacity(3);
     let mut colors = vec![];
 
     for vertex in vertices.iter() {
+        let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
         let clip_v = mvp_mat * vertex.position.to_homogeneous();
         let ndc_v = if clip_v.w != 0.0 {
             clip_v / clip_v.w
@@ -580,13 +561,13 @@ fn draw_wireframe_buffer(
         let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
         let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
         let screen_z = ndc_v.z;
-        s_verts.push(Point3::new(screen_x, screen_y, screen_z));
+        screen_v.push(Point3::new(screen_x, screen_y, screen_z));
         colors.push(vertex.color);
     }
 
-    draw_line_buffer(target, &s_verts[0].xy(), &s_verts[1].xy(), color);
-    draw_line_buffer(target, &s_verts[1].xy(), &s_verts[2].xy(), color);
-    draw_line_buffer(target, &s_verts[2].xy(), &s_verts[0].xy(), color);
+    draw_line_buffer(target, &screen_v[0].xy(), &screen_v[1].xy(), color);
+    draw_line_buffer(target, &screen_v[1].xy(), &screen_v[2].xy(), color);
+    draw_line_buffer(target, &screen_v[2].xy(), &screen_v[0].xy(), color);
 }
 
 fn draw_line_buffer(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32>, color: u32) {
