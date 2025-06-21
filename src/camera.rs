@@ -9,6 +9,7 @@ pub(crate) struct Camera {
     pub near: f32,
     pub far: f32,
 }
+#[allow(unused)]
 impl Camera {
     pub fn new(
         position: Point3<f32>,

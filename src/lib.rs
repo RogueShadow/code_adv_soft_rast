@@ -18,10 +18,9 @@ use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalSize, Size};
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
-use winit::event_loop;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{Cursor, CursorGrabMode, Window, WindowAttributes, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
 
 const WIDTH: f32 = 1600.0;
 const HEIGHT: f32 = 900.0;
@@ -54,6 +53,7 @@ struct Command {
     commands: Vec<SoftRastCommand>,
     timer: Instant,
 }
+#[allow(unused)]
 impl Command {
     pub fn set_title(&mut self, title: &str) {
         self.commands
@@ -79,7 +79,7 @@ impl Default for Command {
     }
 }
 #[derive(Default, Clone)]
-struct InputState {
+pub struct InputState {
     pressed_keys: HashSet<String>,
     mouse_dx: f64,
     mouse_dy: f64,
@@ -267,7 +267,7 @@ impl ApplicationHandler for AppContext {
 
                         for entity in &scene.entities {
                             let transform = &entity.position;
-                            for (vertices) in entity.model.vertices.chunks_exact(3) {
+                            for vertices in entity.model.vertices.chunks_exact(3) {
                                 let mut verts = vertices.to_owned();
                                 if self.draw_tris {
                                     draw_triangle_buffer(
@@ -442,8 +442,8 @@ fn draw_points_buffer(
         } else {
             clip_v
         };
-        let screen_x = ((ndc_v.x + 1.0) * 0.5 * screen_size.x);
-        let screen_y = ((1.0 - ndc_v.y) * 0.5 * screen_size.y);
+        let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
+        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
         let screen_x_u = screen_x as u32;
         let screen_y_u = screen_y as u32;
 
@@ -618,7 +618,7 @@ fn draw_line_buffer(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32
     loop {
         // Set pixel at (x, y) if within bounds
         if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-            let index = (y as usize * width + x as usize);
+            let index = y as usize * width + x as usize;
             if index < color_buffer.len() {
                 color_buffer[index] = color;
             }

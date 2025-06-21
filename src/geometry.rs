@@ -16,7 +16,7 @@ impl Model {
         }
     }
 }
-pub fn load_model(file: &str, random_colors: bool) -> Model {
+pub fn load_model(file: &str, _random_colors: bool) -> Model {
     let file = match read_to_string(file) {
         Ok(file) => file,
         Err(err) => panic!("{}", err),

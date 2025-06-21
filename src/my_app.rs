@@ -26,7 +26,7 @@ impl UserState for MyApp {
     fn handle_event(&mut self, command: &mut Command, event: SoftRastEvent) {
         let time = command.elapsed().as_secs_f32();
         match event {
-            SoftRastEvent::Render { delta, scene } => {
+            SoftRastEvent::Render {  scene, .. } => {
                 let transform = Isometry3::new(
                     Vector3::new(-1.0, 0.0, 0.0),
                     Vector3::new(3.14 + time.sin() * 0.7, 0.0, 0.0),
