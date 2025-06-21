@@ -17,7 +17,10 @@ impl Model {
     }
 }
 pub fn load_model(file: &str, random_colors: bool) -> Model {
-    let file = read_to_string(file).unwrap();
+    let file = match read_to_string(file) {
+        Ok(file) => file,
+        Err(err) => panic!("{}", err),
+    };
     let mut vertice_positions = Vec::new();
     let mut vertice_normals = Vec::new();
     let mut vertice_uvs = Vec::new();

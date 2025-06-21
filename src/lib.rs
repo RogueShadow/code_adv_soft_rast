@@ -3,25 +3,25 @@ mod geometry;
 mod my_app;
 
 use crate::camera::Camera;
-use crate::geometry::{Bounds, Model, Vertex};
+use crate::geometry::{Model, Vertex};
 use crate::my_app::MyApp;
 use geometry::Triangle2d;
-use nalgebra::{Isometry3, Point2, Point3, Vector2, Vector3, Vector4};
+use nalgebra::{Isometry3, Point2, Point3, Vector2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use softbuffer::{Context, Surface};
 use std::collections::HashSet;
 use std::num::NonZeroU32;
-use std::ops::Div;
 use std::rc::Rc;
 use std::thread;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{PhysicalSize, Size};
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
+use winit::event_loop;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::window::{Cursor, CursorGrabMode, Window, WindowAttributes, WindowId};
 
 const WIDTH: f32 = 1600.0;
 const HEIGHT: f32 = 900.0;
@@ -39,11 +39,11 @@ pub enum SoftRastEvent<'a> {
 }
 pub enum SoftRastCommand {
     SetTitle(String),
-    SetRenderingMode{
+    SetRenderingMode {
         tris: bool,
         wireframe: bool,
         points: bool,
-    }
+    },
 }
 
 trait UserState {
@@ -151,35 +151,50 @@ impl RenderTarget {
 impl ApplicationHandler for AppContext {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
-            self.window = Some(Rc::new(
-                event_loop
-                    .create_window(Window::default_attributes())
-                    .unwrap(),
-            ));
+            
+            let mut attributes = WindowAttributes::default();
+            attributes.inner_size = Some(Size::new(PhysicalSize::new(WIDTH, HEIGHT)));
+            
+            let window = match event_loop.create_window(attributes) {
+                Ok(window) => {
+                    Rc::new(window)
+                }
+                Err(err) => {
+                    panic!("{}", err);
+                }
+            };
+            let context = match Context::new(window.clone()) {
+                Ok(context) => {
+                    context
+                }
+                Err(err) => {
+                    panic!("{}", err);
+                }
+            };
+            let surface = match Surface::new(&context, window.clone()) {
+                Ok(surface) => {
+                    surface
+                }
+                Err(err) => {
+                    panic!("{}", err);
+                }
+            };
+            
+            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
+                eprintln!("{:?}", err);
+            }
+            window.set_cursor_visible(false);
+
+            self.window = Some(window.clone());
+            self.context = Some(context);
+            self.surface = Some(surface);
         }
-        self.context = Some(Context::new(self.window.clone().unwrap()).unwrap());
-        self.surface = Some(
-            Surface::new(self.context.as_ref().unwrap(), self.window.clone().unwrap()).unwrap(),
-        );
-        let _ = self
-            .window
-            .as_ref()
-            .unwrap()
-            .request_inner_size(PhysicalSize::new(WIDTH, HEIGHT));
-
-        self.window
-            .as_ref()
-            .unwrap()
-            .set_cursor_grab(CursorGrabMode::Confined)
-            .expect("TODO: panic message");
-        self.window.as_ref().unwrap().set_cursor_visible(false);
-
         self.user_state
             .handle_event(&mut self.command, SoftRastEvent::Resume {});
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        let window = self.window.as_ref().unwrap();
-        let surface = self.surface.as_mut().unwrap();
+        let window = self.window.as_ref().expect("Couldn't get the window.");
+        let surface = self.surface.as_mut().expect("Couldn't get the surface.");
 
         for command in self.command.commands.iter() {
             match command {
@@ -187,7 +202,9 @@ impl ApplicationHandler for AppContext {
                     window.set_title(&title);
                 }
                 SoftRastCommand::SetRenderingMode {
-                    tris,wireframe, points
+                    tris,
+                    wireframe,
+                    points,
                 } => {
                     self.draw_tris = tris.to_owned();
                     self.draw_wireframe = wireframe.to_owned();
@@ -206,12 +223,12 @@ impl ApplicationHandler for AppContext {
                     return;
                 }
                 let (width, height) = { (size.width, size.height) };
-                surface
-                    .resize(
-                        NonZeroU32::new(width).unwrap(),
-                        NonZeroU32::new(height).unwrap(),
-                    )
-                    .unwrap();
+                if let Err(err) = surface.resize(
+                    NonZeroU32::new(width).unwrap_or(NonZeroU32::MIN),
+                    NonZeroU32::new(height).unwrap_or(NonZeroU32::MIN),
+                ) {
+                    eprintln!("{}", err);
+                }
                 self.render_target = Some(RenderTarget::new(width, height));
                 if let Some(scene) = self.scene.as_mut() {
                     scene.camera.aspect_ratio = width as f32 / height as f32;
@@ -239,8 +256,6 @@ impl ApplicationHandler for AppContext {
                 );
                 self.input.reset_mouse_motion();
 
-                let mut buffer = surface.buffer_mut().unwrap();
-                buffer.fill(0u32);
                 if let Some(target) = &mut self.render_target {
                     target.clear();
 
@@ -278,7 +293,7 @@ impl ApplicationHandler for AppContext {
                                         transform,
                                         verts.as_mut(),
                                         &scene.camera,
-                                        Color::new(0.0,0.0,1.0,1.0).as_u32(),
+                                        Color::new(0.0, 0.0, 1.0, 1.0).as_u32(),
                                     )
                                 }
                             }
@@ -289,10 +304,13 @@ impl ApplicationHandler for AppContext {
                             camera: Camera::default(),
                         });
                     }
-                    buffer.copy_from_slice(target.color.as_slice());
+                    if let Ok(mut buffer) = surface.buffer_mut() {
+                        buffer.copy_from_slice(target.color.as_slice());
+                        if let Err(err) = buffer.present() {
+                            eprintln!("{}", err);
+                        }
+                    }
                 }
-
-                buffer.present().unwrap();
 
                 window.set_title(&format!(
                     "Software Renderer Windowed {}x{} @ {:?}",
@@ -349,10 +367,19 @@ impl ApplicationHandler for AppContext {
 }
 
 pub fn run() {
-    EventLoop::new()
-        .unwrap()
-        .run_app(&mut AppContext::new(MyApp::default()))
-        .unwrap();
+    match EventLoop::new() {
+        Ok(event_loop) => { 
+            match event_loop.run_app(&mut AppContext::new(MyApp::default())) {
+                Ok(_) => {}
+                Err(err) => {
+                    eprintln!("{}", err);
+                }
+            }
+        },
+        Err(e) => {
+            panic!("{}", e);
+        },
+    };
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -419,7 +446,7 @@ fn draw_points_buffer(
         let screen_y = ((1.0 - ndc_v.y) * 0.5 * screen_size.y);
         let screen_x_u = screen_x as u32;
         let screen_y_u = screen_y as u32;
-        
+
         let size_u = size.ceil() as u32;
         if screen_x_u < size_u || screen_y_u < size_u {
             return;
@@ -446,7 +473,6 @@ fn draw_triangle_buffer(
     vertices: &mut [Vertex],
     camera: &Camera,
 ) {
-
     let depth_buffer = target.depth.as_mut_slice();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
@@ -479,10 +505,9 @@ fn draw_triangle_buffer(
         screen_vertices[2].xy(),
     );
     let bounds = triangle2d.bounds();
-    
-    
+
     let color_buffer = target.color.as_mut_slice();
-    
+
     for x in bounds.x_range() {
         for y in bounds.y_range() {
             let (in_triangle, weights) = triangle2d.contains(&Point2::new(x as f32, y as f32));
@@ -514,11 +539,12 @@ fn draw_triangle_buffer(
                     if depth > depth_buffer[idx] {
                         continue;
                     }
-                    let color = colors[0].unwrap().interpolate(
-                        &colors[1].unwrap(),
-                        &colors[2].unwrap(),
-                        &weights,
-                    );
+                    let color = match (colors[0],colors[1],colors[2]) {
+                        (Some(c1), Some(c2), Some(c3)) => {
+                            c1.interpolate(&c2,&c3,&weights)
+                        }
+                        _ => Color::new(1.0,1.0,1.0,1.0),
+                    };
                     color_buffer[idx] = color.as_u32();
                     depth_buffer[idx] = depth;
                 }
@@ -534,7 +560,6 @@ fn draw_wireframe_buffer(
     camera: &Camera,
     color: u32,
 ) {
-
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
 
     let model_mat = transform.to_homogeneous();
@@ -558,22 +583,16 @@ fn draw_wireframe_buffer(
         s_verts.push(Point3::new(screen_x, screen_y, screen_z));
         colors.push(vertex.color);
     }
-    
-    draw_line_buffer(target,&s_verts[0].xy(),&s_verts[1].xy(),color);
-    draw_line_buffer(target,&s_verts[1].xy(),&s_verts[2].xy(),color);
-    draw_line_buffer(target,&s_verts[2].xy(),&s_verts[0].xy(),color);
+
+    draw_line_buffer(target, &s_verts[0].xy(), &s_verts[1].xy(), color);
+    draw_line_buffer(target, &s_verts[1].xy(), &s_verts[2].xy(), color);
+    draw_line_buffer(target, &s_verts[2].xy(), &s_verts[0].xy(), color);
 }
 
-fn draw_line_buffer(
-    target: &mut RenderTarget,
-    p1: &Point2<f32>,
-    p2: &Point2<f32>,
-    color: u32,
-) {
+fn draw_line_buffer(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32>, color: u32) {
     let color_buffer = target.color.as_mut_slice();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
-
 
     let x0 = p1.x as i32;
     let y0 = p1.y as i32;
@@ -581,8 +600,7 @@ fn draw_line_buffer(
     let y1 = p2.y as i32;
     let width = screen_size.x as usize;
     let height = screen_size.y as usize;
-    
-    
+
     let x0 = x0.clamp(0, width as i32 - 1);
     let y0 = y0.clamp(0, height as i32 - 1);
     let x1 = x1.clamp(0, width as i32 - 1);

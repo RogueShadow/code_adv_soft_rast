@@ -39,16 +39,18 @@ impl UserState for MyApp {
                 if scene.entities.is_empty() {
                     scene.camera.position = Point3::new(0.0, 0.0, -10.0);
                     self.cam = scene.camera;
-                    scene.entities.push(Entity::new(
-                        "monkey",
-                        self.models.first().unwrap(),
-                        &transform,
-                    ));
-                    scene.entities.push(Entity::new(
-                        "test",
-                        self.models.first().unwrap(),
-                        &transform2,
-                    ));
+                    if let Some(model) = self.models.first() {
+                        scene.entities.push(Entity::new(
+                            "monkey",
+                            model,
+                            &transform,
+                        ));
+                        scene.entities.push(Entity::new(
+                            "test",
+                            model,
+                            &transform2,
+                        ));
+                    }
                 } else {
                     scene.camera = self.cam;
                     if let Some(entity) = scene
@@ -101,25 +103,25 @@ impl UserState for MyApp {
                     self.cam.roll(-speed);
                 }
                 if input.pressed_keys.contains("1") {
-                    command.set_render_mode(false,false,true);
+                    command.set_render_mode(false, false, true);
                 }
                 if input.pressed_keys.contains("2") {
-                    command.set_render_mode(false,true,false);
+                    command.set_render_mode(false, true, false);
                 }
                 if input.pressed_keys.contains("3") {
-                    command.set_render_mode(false,true,true);
+                    command.set_render_mode(false, true, true);
                 }
                 if input.pressed_keys.contains("4") {
-                    command.set_render_mode(true,false,false);
+                    command.set_render_mode(true, false, false);
                 }
                 if input.pressed_keys.contains("5") {
-                    command.set_render_mode(true,false,true);
+                    command.set_render_mode(true, false, true);
                 }
                 if input.pressed_keys.contains("6") {
-                    command.set_render_mode(true,true,false);
+                    command.set_render_mode(true, true, false);
                 }
                 if input.pressed_keys.contains("7") {
-                    command.set_render_mode(true,true,true);
+                    command.set_render_mode(true, true, true);
                 }
             }
             SoftRastEvent::Resume {} => {
