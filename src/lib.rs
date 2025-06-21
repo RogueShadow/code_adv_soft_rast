@@ -477,61 +477,64 @@ fn draw_triangle_buffer(
     for vertex in vertices {
         let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
         let clip_v = mvp_mat * vertex.position.to_homogeneous();
-        let ndc_v = if clip_v.w != 0.0 {
-            clip_v / clip_v.w
-        } else {
-            clip_v
-        };
-        let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
-        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
-        let screen_z = ndc_v.z;
-        screen_v.push(Point3::new(screen_x, screen_y, screen_z));
-        colors.push(vertex.color);
+        if clip_v.z > camera.near && clip_v.z < camera.far {
+            let ndc_v = if clip_v.w != 0.0 {
+                clip_v / clip_v.w
+            } else {
+                clip_v
+            };
+            let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
+            let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
+            let screen_z = ndc_v.z;
+            if screen_x > screen_size.x || screen_y > screen_size.y || screen_x < 0.0 || screen_y < 0.0 {continue}
+            screen_v.push(Point3::new(screen_x, screen_y, screen_z));
+            colors.push(vertex.color);
+        }
     }
-    
-    let bounds = Bounds::new(&screen_v);
-
     let color_buffer = target.color.as_mut_slice();
-
-    for x in bounds.x_range() {
-        for y in bounds.y_range() {
-            let (in_triangle, weights) = point_in_triangle(&screen_v[0].xy(), &screen_v[1].xy(), &screen_v[2].xy(), &Point2::new(x as f32, y as f32));
-            if in_triangle {
-                let depths = Vector3::new(
-                    if screen_v[0].z.abs() > 1e-6 {
-                        1.0 / screen_v[0].z
+    
+    for tri in screen_v.chunks_exact(3) {
+        let bounds = Bounds::new(&tri);
+        for x in bounds.x_range() {
+            for y in bounds.y_range() {
+                let (in_triangle, weights) = point_in_triangle(&tri[0].xy(), &tri[1].xy(), &tri[2].xy(), &Point2::new(x as f32, y as f32));
+                if in_triangle {
+                    let depths = Vector3::new(
+                        if tri[0].z.abs() > 1e-6 {
+                            1.0 / tri[0].z
+                        } else {
+                            0.0
+                        },
+                        if tri[1].z.abs() > 1e-6 {
+                            1.0 / tri[1].z
+                        } else {
+                            0.0
+                        },
+                        if tri[2].z.abs() > 1e-6 {
+                            1.0 / tri[2].z
+                        } else {
+                            0.0
+                        },
+                    );
+                    let depth = if depths.dot(&weights).abs() > 1e-6 {
+                        1.0 / depths.dot(&weights)
                     } else {
                         0.0
-                    },
-                    if screen_v[1].z.abs() > 1e-6 {
-                        1.0 / screen_v[1].z
-                    } else {
-                        0.0
-                    },
-                    if screen_v[2].z.abs() > 1e-6 {
-                        1.0 / screen_v[2].z
-                    } else {
-                        0.0
-                    },
-                );
-                let depth = if depths.dot(&weights).abs() > 1e-6 {
-                    1.0 / depths.dot(&weights)
-                } else {
-                    0.0
-                };
-                let idx = (y * screen_size.x as u32 + x) as usize;
-                if idx < (screen_size.x * screen_size.y) as usize {
-                    if depth > depth_buffer[idx] {
-                        continue;
-                    }
-                    let color = match (colors[0],colors[1],colors[2]) {
-                        (Some(c1), Some(c2), Some(c3)) => {
-                            c1.interpolate(&c2,&c3,&weights)
-                        }
-                        _ => Color::new(1.0,1.0,1.0,1.0),
                     };
-                    color_buffer[idx] = color.as_u32();
-                    depth_buffer[idx] = depth;
+                    let idx = (y * screen_size.x as u32 + x) as usize;
+                    if idx < (screen_size.x * screen_size.y) as usize {
+                        if depth > depth_buffer[idx] {
+                            continue;
+                        }
+                        let color = match (colors[0], colors[1], colors[2]) {
+                            (Some(c1), Some(c2), Some(c3)) => {
+                                c1.interpolate(&c2, &c3, &weights)
+                            }
+                            _ => Color::new(1.0, 1.0, 1.0, 1.0),
+                        };
+                        color_buffer[idx] = color.as_u32();
+                        depth_buffer[idx] = depth;
+                    }
                 }
             }
         }
