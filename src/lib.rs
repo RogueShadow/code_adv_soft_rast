@@ -38,7 +38,7 @@ pub enum SoftRastEvent<'a> {
 pub enum SoftRastCommand {
     SetTitle(String),
     SetRenderingMode {
-        tris: bool,
+        shaded: bool,
         wireframe: bool,
         points: bool,
     },
@@ -58,9 +58,9 @@ impl Command {
         self.commands
             .push(SoftRastCommand::SetTitle(title.to_owned()));
     }
-    pub fn set_render_mode(&mut self, tris: bool, wireframe: bool, points: bool) {
+    pub fn set_render_mode(&mut self, shaded: bool, wireframe: bool, points: bool) {
         self.commands.push(SoftRastCommand::SetRenderingMode {
-            tris,
+            shaded,
             wireframe,
             points,
         })
@@ -100,9 +100,7 @@ struct AppContext {
     scene: Option<Scene>,
     timer: Instant,
     input: InputState,
-    draw_tris: bool,
-    draw_wireframe: bool,
-    draw_points: bool,
+    draw_mode: DrawMode,
 }
 impl AppContext {
     pub fn new(user_state: impl UserState + 'static) -> Self {
@@ -116,9 +114,7 @@ impl AppContext {
             scene: None,
             timer: Instant::now(),
             input: InputState::default(),
-            draw_tris: true,
-            draw_wireframe: true,
-            draw_points: false,
+            draw_mode: DrawMode {shaded: true, wireframe: false, points: false}
         }
     }
 }
@@ -194,13 +190,15 @@ impl ApplicationHandler for AppContext {
                     window.set_title(&title);
                 }
                 SoftRastCommand::SetRenderingMode {
-                    tris,
+                    shaded,
                     wireframe,
                     points,
                 } => {
-                    self.draw_tris = tris.to_owned();
-                    self.draw_wireframe = wireframe.to_owned();
-                    self.draw_points = points.to_owned();
+                    self.draw_mode = DrawMode {
+                        shaded: *shaded,
+                        wireframe: *wireframe,
+                        points: *points,
+                    }
                 }
             }
         }
@@ -258,10 +256,7 @@ impl ApplicationHandler for AppContext {
                         );
                         let camera = &scene.camera;
                         for entity in &scene.entities {
-                            let transform = &entity.position;
-                            for vertices in entity.model.vertices.chunks_exact(3) {
-                                draw_buffer(target, transform, camera, vertices,self.draw_wireframe,self.draw_points,self.draw_tris);
-                            }
+                                draw_buffer(target, &entity.position, camera, &entity.model,&self.draw_mode);
                         }
                     } else {
                         self.scene = Some(Scene {
@@ -380,53 +375,64 @@ pub fn random_color(rng: &mut XorShiftRng) -> Color {
         1.0,
     )
 }
-
-
-#[inline(always)]
+#[derive(Copy,Clone)]
+struct DrawMode {
+    wireframe: bool,
+    shaded: bool,
+    points: bool,
+}
+impl Default for DrawMode {
+    fn default() -> Self {
+        Self {
+            wireframe: false,
+            shaded: true,
+            points: false,
+        }
+    }
+}
 fn draw_buffer(
     target: &mut RenderTarget,
     transform: &Isometry3<f32>,
     camera: &Camera,
-    vertices: &[Vertex],
-    wireframe: bool,
-    points: bool,
-    shaded: bool,
+    model: &Model,
+    mode: &DrawMode,
 ) {
-    let mut screen_vertices = Vec::with_capacity(3);
-
-    for vertex in vertices {
-        let mvp_mat =
-            camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
-        let clip_v = mvp_mat * vertex.position.to_homogeneous();
-        if clip_v.z < camera.near || clip_v.z > camera.far {continue}
-        let ndc_v = if clip_v.w != 0.0 {
-            clip_v / clip_v.w
-        } else {
-            clip_v
-        };
-        let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
-        let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
-        let screen_z = ndc_v.z;
-        if screen_x > target.width as f32 || screen_y > target.height as f32 || screen_x < 0.0 || screen_y < 0.0
-        {
-            continue;
+    let mut screen_vertices = Vec::with_capacity(model.vertices.len());
+    for vertices in model.vertices.chunks(3) {
+        for vertex in vertices {
+            let mvp_mat =
+                camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
+            let clip_v = mvp_mat * vertex.position.to_homogeneous();
+            if clip_v.z < camera.near || clip_v.z > camera.far { continue }
+            let ndc_v = if clip_v.w != 0.0 {
+                clip_v / clip_v.w
+            } else {
+                clip_v
+            };
+            let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
+            let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
+            let screen_z = ndc_v.z;
+            if screen_x > target.width as f32 || screen_y > target.height as f32 || screen_x < 0.0 || screen_y < 0.0
+            {
+                continue;
+            }
+            let mut sv = vertex.clone();
+            sv.position = Point3::new(screen_x, screen_y, screen_z);
+            screen_vertices.push(sv);
         }
-        let mut sv = vertex.clone();
-        sv.position = Point3::new(screen_x, screen_y, screen_z);
-        screen_vertices.push(sv);
     }
 
     for triangle in screen_vertices.chunks_exact(3) {
-        if shaded {
+        if mode.shaded {
             draw_triangle(target, triangle);
         }
-        if wireframe {
+        if mode.wireframe {
             let color = Color::new(1.0,1.0,1.0,1.0).as_u32();
             draw_line(target, &triangle[0].position.xy(), &triangle[1].position.xy(), color );
             draw_line(target, &triangle[1].position.xy(), &triangle[2].position.xy(), color);
             draw_line(target, &triangle[2].position.xy(), &triangle[0].position.xy(), color);
         }
-        if points {
+        if mode.points {
             let size = 2.0;
             let color = Color::new(0.5,0.5,0.5,1.0).as_u32();
             draw_point(target,&triangle[0],size,color);
