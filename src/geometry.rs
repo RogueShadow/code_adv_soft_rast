@@ -1,5 +1,5 @@
 use crate::{Color, random_color};
-use nalgebra::{Point2, Point3,Vector2, Vector3};
+use nalgebra::{Point2, Point3, Vector2, Vector3};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::fs::read_to_string;
@@ -181,7 +181,7 @@ pub struct Bounds {
     pub max_y: f32,
 }
 impl Bounds {
-    pub fn new<T: AsRef<[Point3<f32>]>>(points: T) -> Self {
+    pub fn new<T: AsRef<[Vertex]>>(points: T) -> Self {
         let points = points.as_ref();
         if points.is_empty() {
             return Self {
@@ -193,16 +193,16 @@ impl Bounds {
         }
 
         let first = points[0];
-        let mut min_x = first.x;
-        let mut min_y = first.y;
-        let mut max_x = first.x;
-        let mut max_y = first.y;
+        let mut min_x = first.position.x;
+        let mut min_y = first.position.y;
+        let mut max_x = first.position.x;
+        let mut max_y = first.position.y;
 
         for point in points.iter().skip(1) {
-            min_x = min_x.min(point.x);
-            min_y = min_y.min(point.y);
-            max_x = max_x.max(point.x);
-            max_y = max_y.max(point.y);
+            min_x = min_x.min(point.position.x);
+            min_y = min_y.min(point.position.y);
+            max_x = max_x.max(point.position.x);
+            max_y = max_y.max(point.position.y);
         }
 
         Self {
@@ -220,7 +220,12 @@ impl Bounds {
     }
 }
 
-pub fn point_in_triangle(a: &Point2<f32>, b: &Point2<f32>, c: &Point2<f32>, p: &Point2<f32>) -> (bool, Vector3<f32>) {
+pub fn point_in_triangle(
+    a: &Point2<f32>,
+    b: &Point2<f32>,
+    c: &Point2<f32>,
+    p: &Point2<f32>,
+) -> (bool, Vector3<f32>) {
     let area_abp = signed_area(&a, &b, p);
     let area_bcp = signed_area(&b, &c, p);
     let area_cap = signed_area(&c, &a, p);

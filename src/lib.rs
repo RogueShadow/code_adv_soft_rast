@@ -3,7 +3,7 @@ mod geometry;
 mod my_app;
 
 use crate::camera::Camera;
-use crate::geometry::{point_in_triangle, Bounds, Model, Vertex};
+use crate::geometry::{Bounds, Model, Vertex, point_in_triangle};
 use crate::my_app::MyApp;
 use nalgebra::{Isometry3, Point2, Point3, Vector2, Vector3};
 use rand::Rng;
@@ -150,30 +150,23 @@ impl RenderTarget {
 impl ApplicationHandler for AppContext {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
-
             let mut attributes = WindowAttributes::default();
             attributes.inner_size = Some(Size::new(PhysicalSize::new(WIDTH, HEIGHT)));
 
             let window = match event_loop.create_window(attributes) {
-                Ok(window) => {
-                    Rc::new(window)
-                }
+                Ok(window) => Rc::new(window),
                 Err(err) => {
                     panic!("{}", err);
                 }
             };
             let context = match Context::new(window.clone()) {
-                Ok(context) => {
-                    context
-                }
+                Ok(context) => context,
                 Err(err) => {
                     panic!("{}", err);
                 }
             };
             let surface = match Surface::new(&context, window.clone()) {
-                Ok(surface) => {
-                    surface
-                }
+                Ok(surface) => surface,
                 Err(err) => {
                     panic!("{}", err);
                 }
@@ -267,33 +260,7 @@ impl ApplicationHandler for AppContext {
                         for entity in &scene.entities {
                             let transform = &entity.position;
                             for vertices in entity.model.vertices.chunks_exact(3) {
-                                if self.draw_tris {
-                                    draw_triangle_buffer(
-                                        target,
-                                        transform,
-                                        camera,
-                                        vertices,
-                                    );
-                                }
-                                if self.draw_points {
-                                    draw_points_buffer(
-                                        target,
-                                        transform,
-                                        camera,
-                                        vertices,
-                                        Color::new(0.0, 1.0, 0.0, 1.0).as_u32(),
-                                        2.0,
-                                    );
-                                }
-                                if self.draw_wireframe {
-                                    draw_wireframe_buffer(
-                                        target,
-                                        transform,
-                                        camera,
-                                        vertices,
-                                        Color::new(0.0, 0.0, 1.0, 1.0).as_u32(),
-                                    )
-                                }
+                                draw_buffer(target, transform, camera, vertices,self.draw_wireframe,self.draw_points,self.draw_tris);
                             }
                         }
                     } else {
@@ -366,17 +333,15 @@ impl ApplicationHandler for AppContext {
 
 pub fn run() {
     match EventLoop::new() {
-        Ok(event_loop) => {
-            match event_loop.run_app(&mut AppContext::new(MyApp::default())) {
-                Ok(_) => {}
-                Err(err) => {
-                    eprintln!("{}", err);
-                }
+        Ok(event_loop) => match event_loop.run_app(&mut AppContext::new(MyApp::default())) {
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!("{}", err);
             }
         },
         Err(e) => {
             panic!("{}", e);
-        },
+        }
     };
 }
 
@@ -416,164 +381,111 @@ pub fn random_color(rng: &mut XorShiftRng) -> Color {
     )
 }
 
-fn draw_points_buffer(
-    target: &mut RenderTarget,
-    transform: &Isometry3<f32>,
-    camera: &Camera,
-    vertices: &[Vertex],
-    color: u32,
-    size: f32,
-) {
-    let color_buffer = target.color.as_mut_slice();
-
-    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
-
-    for v in vertices {
-        let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
-        let clip_v = mvp_mat * v.position.to_homogeneous();
-        let ndc_v = if clip_v.w != 0.0 {
-            clip_v / clip_v.w
-        } else {
-            clip_v
-        };
-        let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
-        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
-        let screen_x_u = screen_x as u32;
-        let screen_y_u = screen_y as u32;
-
-        let size_u = size.ceil() as u32;
-        if screen_x_u < size_u || screen_y_u < size_u {
-            return;
-        }
-        for x in screen_x_u - size_u..screen_x_u + size_u {
-            for y in screen_y_u - size_u..screen_y_u + size_u {
-                let idx = (y * screen_size.x as u32 + x) as usize;
-                if idx < (screen_size.x * screen_size.y) as usize {
-                    let test_pos = Point2::new(x as f32, y as f32);
-                    let pos = Point2::new(screen_x, screen_y);
-                    if (test_pos - pos).magnitude() < size {
-                        color_buffer[idx] = color;
-                    }
-                }
-            }
-        }
-    }
-}
 
 #[inline(always)]
-fn draw_triangle_buffer(
+fn draw_buffer(
     target: &mut RenderTarget,
     transform: &Isometry3<f32>,
     camera: &Camera,
     vertices: &[Vertex],
+    wireframe: bool,
+    points: bool,
+    shaded: bool,
 ) {
-    let depth_buffer = target.depth.as_mut_slice();
-
-    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
-
-    let mut screen_v = Vec::with_capacity(3);
-    let mut colors = vec![];
+    let mut screen_vertices = Vec::with_capacity(3);
 
     for vertex in vertices {
-        let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
+        let mvp_mat =
+            camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
         let clip_v = mvp_mat * vertex.position.to_homogeneous();
-        if clip_v.z > camera.near && clip_v.z < camera.far {
-            let ndc_v = if clip_v.w != 0.0 {
-                clip_v / clip_v.w
-            } else {
-                clip_v
-            };
-            let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
-            let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
-            let screen_z = ndc_v.z;
-            if screen_x > screen_size.x || screen_y > screen_size.y || screen_x < 0.0 || screen_y < 0.0 {continue}
-            screen_v.push(Point3::new(screen_x, screen_y, screen_z));
-            colors.push(vertex.color);
-        }
-    }
-    let color_buffer = target.color.as_mut_slice();
-    
-    for tri in screen_v.chunks_exact(3) {
-        let bounds = Bounds::new(&tri);
-        for x in bounds.x_range() {
-            for y in bounds.y_range() {
-                let (in_triangle, weights) = point_in_triangle(&tri[0].xy(), &tri[1].xy(), &tri[2].xy(), &Point2::new(x as f32, y as f32));
-                if in_triangle {
-                    let depths = Vector3::new(
-                        if tri[0].z.abs() > 1e-6 {
-                            1.0 / tri[0].z
-                        } else {
-                            0.0
-                        },
-                        if tri[1].z.abs() > 1e-6 {
-                            1.0 / tri[1].z
-                        } else {
-                            0.0
-                        },
-                        if tri[2].z.abs() > 1e-6 {
-                            1.0 / tri[2].z
-                        } else {
-                            0.0
-                        },
-                    );
-                    let depth = if depths.dot(&weights).abs() > 1e-6 {
-                        1.0 / depths.dot(&weights)
-                    } else {
-                        0.0
-                    };
-                    let idx = (y * screen_size.x as u32 + x) as usize;
-                    if idx < (screen_size.x * screen_size.y) as usize {
-                        if depth > depth_buffer[idx] {
-                            continue;
-                        }
-                        let color = match (colors[0], colors[1], colors[2]) {
-                            (Some(c1), Some(c2), Some(c3)) => {
-                                c1.interpolate(&c2, &c3, &weights)
-                            }
-                            _ => Color::new(1.0, 1.0, 1.0, 1.0),
-                        };
-                        color_buffer[idx] = color.as_u32();
-                        depth_buffer[idx] = depth;
-                    }
-                }
-            }
-        }
-    }
-}
-#[inline(always)]
-fn draw_wireframe_buffer(
-    target: &mut RenderTarget,
-    transform: &Isometry3<f32>,
-    camera: &Camera,
-    vertices: &[Vertex],
-    color: u32,
-) {
-    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
-
-    let mut screen_v = Vec::with_capacity(3);
-    let mut colors = vec![];
-
-    for vertex in vertices.iter() {
-        let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous();
-        let clip_v = mvp_mat * vertex.position.to_homogeneous();
+        if clip_v.z < camera.near || clip_v.z > camera.far {continue}
         let ndc_v = if clip_v.w != 0.0 {
             clip_v / clip_v.w
         } else {
             clip_v
         };
-        let screen_x = (ndc_v.x + 1.0) * 0.5 * screen_size.x;
-        let screen_y = (1.0 - ndc_v.y) * 0.5 * screen_size.y;
+        let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
+        let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
         let screen_z = ndc_v.z;
-        screen_v.push(Point3::new(screen_x, screen_y, screen_z));
-        colors.push(vertex.color);
+        if screen_x > target.width as f32 || screen_y > target.height as f32 || screen_x < 0.0 || screen_y < 0.0
+        {
+            continue;
+        }
+        let mut sv = vertex.clone();
+        sv.position = Point3::new(screen_x, screen_y, screen_z);
+        screen_vertices.push(sv);
     }
 
-    draw_line_buffer(target, &screen_v[0].xy(), &screen_v[1].xy(), color);
-    draw_line_buffer(target, &screen_v[1].xy(), &screen_v[2].xy(), color);
-    draw_line_buffer(target, &screen_v[2].xy(), &screen_v[0].xy(), color);
+    for triangle in screen_vertices.chunks_exact(3) {
+        if shaded {
+            draw_triangle(target, triangle);
+        }
+        if wireframe {
+            let color = Color::new(1.0,1.0,1.0,1.0).as_u32();
+            draw_line(target, &triangle[0].position.xy(), &triangle[1].position.xy(), color );
+            draw_line(target, &triangle[1].position.xy(), &triangle[2].position.xy(), color);
+            draw_line(target, &triangle[2].position.xy(), &triangle[0].position.xy(), color);
+        }
+        if points {
+            let size = 2.0;
+            let color = Color::new(0.5,0.5,0.5,1.0).as_u32();
+            draw_point(target,&triangle[0],size,color);
+            draw_point(target,&triangle[1],size,color);
+            draw_point(target,&triangle[2],size,color);
+        }
+    }
+}
+fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex]) {
+    let bounds = Bounds::new(&triangle);
+    for x in bounds.x_range() {
+        for y in bounds.y_range() {
+            let (in_triangle, weights) = point_in_triangle(
+                &triangle[0].position.xy(),
+                &triangle[1].position.xy(),
+                &triangle[2].position.xy(),
+                &Point2::new(x as f32, y as f32),
+            );
+            if in_triangle {
+                let depths = Vector3::new(
+                    if triangle[0].position.z.abs() > 1e-6 {
+                        1.0 / triangle[0].position.z
+                    } else {
+                        0.0
+                    },
+                    if triangle[1].position.z.abs() > 1e-6 {
+                        1.0 / triangle[1].position.z
+                    } else {
+                        0.0
+                    },
+                    if triangle[2].position.z.abs() > 1e-6 {
+                        1.0 / triangle[2].position.z
+                    } else {
+                        0.0
+                    },
+                );
+                let depth = if depths.dot(&weights).abs() > 1e-6 {
+                    1.0 / depths.dot(&weights)
+                } else {
+                    0.0
+                };
+                let idx = (y * target.width + x) as usize;
+                if idx < (target.width * target.height) as usize {
+                    if depth > target.depth[idx] {
+                        continue;
+                    }
+                    let color = match (triangle[0].color, triangle[1].color, triangle[2].color) {
+                        (Some(c1), Some(c2), Some(c3)) => c1.interpolate(&c2, &c3, &weights),
+                        _ => Color::new(1.0, 1.0, 1.0, 1.0),
+                    };
+                    target.color[idx] = color.as_u32();
+                    target.depth[idx] = depth;
+                }
+            }
+        }
+    }
 }
 
-fn draw_line_buffer(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32>, color: u32) {
+fn draw_line(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32>, color: u32) {
     let color_buffer = target.color.as_mut_slice();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
@@ -620,6 +532,20 @@ fn draw_line_buffer(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32
         if e2 <= dx {
             err += dx;
             y += sy;
+        }
+    }
+}
+fn draw_point(target: &mut RenderTarget, point: &Vertex, size: f32, color: u32) {
+    for x in (point.position.x - size.ceil()) as u32..(point.position.x + size.ceil()) as u32 {
+        for y in (point.position.y - size.ceil()) as u32..(point.position.y + size.ceil()) as u32 {
+            let idx = (y * target.width + x) as usize;
+            if idx < (target.width * target.height) as usize {
+                let test_pos = Point2::new(x as f32, y as f32);
+                let pos = point.position.xy();
+                if (test_pos - pos).magnitude() < size {
+                    target.color[idx] = color;
+                }
+            }
         }
     }
 }
