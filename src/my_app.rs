@@ -1,6 +1,6 @@
-use crate::geometry::{Model, load_model};
+use crate::geometry::{Model, load_model, Texture};
 use crate::{Camera, Command, Entity, SoftRastEvent, UserState};
-use nalgebra::{Isometry3, Point3, Vector3};
+use nalgebra::{Isometry3, Point3, Scale3, Vector3};
 
 pub struct MyApp {
     pub models: Vec<Model>,
@@ -29,12 +29,9 @@ impl UserState for MyApp {
             SoftRastEvent::Render { scene, .. } => {
                 let transform = Isometry3::new(
                     Vector3::new(-1.0, 0.0, 0.0),
-                    Vector3::new(3.14 + time.sin() * 0.7, 0.0, 0.0),
+                    Vector3::new(0.0, time / 2.0 , 0.0),
                 );
-                let transform2 = Isometry3::new(
-                    Vector3::new(1.0, 0.0, -0.0),
-                    Vector3::new(0.0, time.sin(), 0.0),
-                );
+
 
                 if scene.entities.is_empty() {
                     scene.camera.position = Point3::new(0.0, 0.0, -10.0);
@@ -42,26 +39,17 @@ impl UserState for MyApp {
                     if let Some(model) = self.models.first() {
                         scene
                             .entities
-                            .push(Entity::new("monkey", model, &transform));
-                        scene.entities.push(Entity::new("test", model, &transform2));
+                            .push(Entity::new("eevee", model, &transform, &Scale3::identity()));
                     }
                 } else {
                     scene.camera = self.cam;
                     if let Some(entity) = scene
                         .entities
                         .iter_mut()
-                        .filter(|e| e.id == "monkey".to_string())
+                        .filter(|e| e.id == "eevee".to_string())
                         .next()
                     {
                         entity.position = transform;
-                    }
-                    if let Some(entity) = scene
-                        .entities
-                        .iter_mut()
-                        .filter(|e| e.id == "test".to_string())
-                        .next()
-                    {
-                        entity.position = transform2;
                     }
                 }
             }
@@ -119,7 +107,10 @@ impl UserState for MyApp {
                 }
             }
             SoftRastEvent::Resume {} => {
-                self.models.push(load_model("assets/monkey.obj", true));
+                self.models.push(load_model("assets/Eevee.obj"));
+                self.models.last_mut().unwrap().texture = Texture::new("assets/EEVEEUV.png");
+                // self.models.push(load_model("assets/spyro.obj"));
+                // self.models.last_mut().unwrap().texture = Texture::new("assets/SpyroTex.png");
             }
         }
     }

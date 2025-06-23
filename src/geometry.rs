@@ -1,22 +1,60 @@
-use crate::{Color, random_color};
 use nalgebra::{Point2, Point3, Vector2, Vector3};
 use rand::SeedableRng;
 use rand_xorshift::XorShiftRng;
 use std::fs::read_to_string;
 use std::ops::RangeInclusive;
+use image::{DynamicImage, GenericImageView, Rgba};
+use crate::renderer::{random_color, Color};
+
+#[derive(Debug, Clone)]
+pub struct Texture {
+    pub texture: DynamicImage,
+}
+impl Texture {
+    pub fn new(path: &str) -> Option<Texture> {
+        match image::open(path) {
+            Ok(image) => {
+                Some(Texture {texture: image.to_owned()})
+            }
+            Err(err) => {
+                println!("{}", err);
+                None
+            }
+        }
+    }
+}
+impl Texture {
+    pub fn sample(&self, tex_coord: &Point2<f32>) -> Option<Color> {
+        let width = self.texture.width();
+        let height = self.texture.height();
+        let x = (tex_coord.x.clamp(0.0,1.0) * (width as f32 - 1.0)).round() as u32;
+        let y = ((1.0 -tex_coord.y.clamp(0.0,1.0)) * (height as f32 - 1.0)).round() as u32;
+        
+        if (0..self.texture.width()).contains(&x) &&
+            (0..self.texture.height()).contains(&y) {
+            let Rgba([r,g,b,a]) = self.texture.get_pixel(x,y);
+            Some(Color::from_rgba(r,g,b,a))        
+        } else {
+            None
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Model {
     pub vertices: Vec<Vertex>,
+    pub texture: Option<Texture>,
 }
 impl Model {
     pub fn from_vertices(vertices: &[Vertex]) -> Model {
         Self {
             vertices: vertices.to_vec(),
+            texture: None,
         }
     }
 }
-pub fn load_model(file: &str, _random_colors: bool) -> Model {
+pub fn load_model(file: &str) -> Model {
+    let color = Color::new(1.0,1.0,1.0,1.0);
     let file = match read_to_string(file) {
         Ok(file) => file,
         Err(err) => panic!("{}", err),
@@ -84,21 +122,21 @@ pub fn load_model(file: &str, _random_colors: bool) -> Model {
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
                 vertices.push(vertex_from_face(
                     &face[1],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
                 vertices.push(vertex_from_face(
                     &face[2],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
             }
             4 => {
@@ -107,21 +145,21 @@ pub fn load_model(file: &str, _random_colors: bool) -> Model {
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
                 vertices.push(vertex_from_face(
                     &face[1],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
                 vertices.push(vertex_from_face(
                     &face[2],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
 
                 vertices.push(vertex_from_face(
@@ -129,21 +167,21 @@ pub fn load_model(file: &str, _random_colors: bool) -> Model {
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
                 vertices.push(vertex_from_face(
                     &face[2],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
                 vertices.push(vertex_from_face(
                     &face[3],
                     &vertice_positions,
                     &vertice_uvs,
                     &vertice_normals,
-                    Some(random_color(&mut rng)),
+                    Some(color),
                 ));
             }
             n => eprintln!("Unsupported face {} vertices", n),

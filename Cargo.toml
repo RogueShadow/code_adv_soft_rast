@@ -13,3 +13,4 @@ rand_xorshift = "0.4.0"
 winit = { version = "0.30.11"}
 softbuffer = "0.4.6"
 nalgebra = { version = "0.33.2" }
+image = "0.25.6"
