@@ -128,6 +128,9 @@ pub fn draw_buffer(
             }
             let mut sv = vertex.clone();
             sv.position = Point3::new(screen_x, screen_y, screen_z);
+            if sv.normal.is_some() {
+                sv.normal = Some(transform * sv.normal.unwrap());
+            }
             screen_vertices.push(sv);
         }
     }

@@ -52,7 +52,7 @@ impl UserState for MyApp {
                         .filter(|e| e.id == "eevee".to_string())
                         .next()
                     {
-                        //entity.position = transform;
+                        entity.position = transform;
                     }
                 }
             }
