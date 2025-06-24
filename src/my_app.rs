@@ -37,6 +37,9 @@ impl UserState for MyApp {
                     scene.camera.position = Point3::new(0.0, 0.0, -10.0);
                     self.cam = scene.camera;
                     if let Some(model) = self.models.first() {
+                        scene.entities.push(Entity::new("monkey", model, &transform, &Scale3::identity()));
+                    }
+                    if let Some(model) = self.models.last() {
                         scene
                             .entities
                             .push(Entity::new("eevee", model, &transform, &Scale3::identity()));
@@ -49,7 +52,7 @@ impl UserState for MyApp {
                         .filter(|e| e.id == "eevee".to_string())
                         .next()
                     {
-                        entity.position = transform;
+                        //entity.position = transform;
                     }
                 }
             }
@@ -107,6 +110,7 @@ impl UserState for MyApp {
                 }
             }
             SoftRastEvent::Resume {} => {
+                self.models.push(load_model("assets/monkey.obj"));
                 self.models.push(load_model("assets/Eevee.obj"));
                 self.models.last_mut().unwrap().texture = Texture::new("assets/EEVEEUV.png");
                 // self.models.push(load_model("assets/spyro.obj"));

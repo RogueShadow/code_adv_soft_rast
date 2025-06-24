@@ -1,10 +1,8 @@
 use nalgebra::{Point2, Point3, Vector2, Vector3};
-use rand::SeedableRng;
-use rand_xorshift::XorShiftRng;
 use std::fs::read_to_string;
 use std::ops::RangeInclusive;
 use image::{DynamicImage, GenericImageView, Rgba};
-use crate::renderer::{random_color, Color};
+use crate::renderer::{Color};
 
 #[derive(Debug, Clone)]
 pub struct Texture {
@@ -40,7 +38,7 @@ impl Texture {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Model {
     pub vertices: Vec<Vertex>,
     pub texture: Option<Texture>,
@@ -112,8 +110,7 @@ pub fn load_model(file: &str) -> Model {
             }
         }
     }
-
-    let mut rng = XorShiftRng::seed_from_u64(0);
+    
     for face in faces {
         match face.len() {
             3 => {
@@ -230,7 +227,7 @@ impl Bounds {
             };
         }
 
-        let first = points[0];
+        let first = points[0].clone();
         let mut min_x = first.position.x;
         let mut min_y = first.position.y;
         let mut max_x = first.position.x;
@@ -288,7 +285,7 @@ pub fn perpendicular_vector(v: &Vector2<f32>) -> Vector2<f32> {
     Vector2::new(v.y, -v.x)
 }
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct Vertex {
     pub position: Point3<f32>,
     pub normal: Option<Vector3<f32>>,

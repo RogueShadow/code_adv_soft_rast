@@ -1,6 +1,9 @@
+use std::ops::{DerefMut, MulAssign};
+use std::sync::{Arc, Mutex};
 use nalgebra::{Isometry3, Point2, Point3, Scale3, Vector2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
+use rayon::prelude::*;
 use crate::camera::Camera;
 use crate::geometry::{point_in_triangle, Bounds, Model, Texture, Vertex};
 
@@ -128,25 +131,26 @@ pub fn draw_buffer(
             screen_vertices.push(sv);
         }
     }
-
-    for triangle in screen_vertices.chunks_exact(3) {
-        if mode.shaded {
-            draw_triangle(target, triangle, model.texture.as_ref());
-        }
-        if mode.wireframe {
-            let color = Color::new(1.0,1.0,1.0,1.0).as_u32();
-            draw_line(target, &triangle[0].position.xy(), &triangle[1].position.xy(), color );
-            draw_line(target, &triangle[1].position.xy(), &triangle[2].position.xy(), color);
-            draw_line(target, &triangle[2].position.xy(), &triangle[0].position.xy(), color);
-        }
-        if mode.points {
-            let size = 2.0;
-            let color = Color::new(0.5,0.5,0.5,1.0).as_u32();
-            draw_point(target,&triangle[0],size,color);
-            draw_point(target,&triangle[1],size,color);
-            draw_point(target,&triangle[2],size,color);
-        }
-    }
+    
+    let color = Color::new(1.0,1.0,1.0,1.0).as_u32();
+    screen_vertices
+        .as_slice()
+        .chunks_exact(3)
+        .for_each(|triangle| {
+            if mode.shaded {
+                draw_triangle(target,triangle,model.texture.as_ref())
+            }
+            if mode.wireframe {
+                draw_line(target,&triangle[0],&triangle[1],color);
+                draw_line(target,&triangle[1],&triangle[2],color);
+                draw_line(target,&triangle[2],&triangle[0],color);
+            }
+            if mode.points {
+                draw_point(target,&triangle[0],2.0,color);
+                draw_point(target,&triangle[1],2.0,color);
+                draw_point(target,&triangle[2],2.0,color);
+            }
+        });
 }
 fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option<&Texture>) {
     let bounds = Bounds::new(&triangle);
@@ -186,7 +190,7 @@ fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option
                     if depth > target.depth[idx] {
                         continue;
                     }
-                    let texture_color = if let Some(texture) = texture {
+                    let mut texture_color = if let Some(texture) = texture {
                         let uvs = triangle.iter().filter_map(|v| v.uv).collect::<Vec<_>>();
                         if uvs.len() == 3 {
                             let mut tex_coord = Point2::<f32>::origin();
@@ -203,6 +207,20 @@ fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option
                             _ => Color::new(1.0, 1.0, 1.0, 1.0),
                         }
                     };
+                    let normals = triangle.iter().filter_map(|v| v.normal).collect::<Vec<_>>();
+                    let mut normal = Vector3::<f32>::zeros();
+                    if normals.len() == 3 {
+                        let light_dir = Vector3::<f32>::new(1.0,1.0,0.0).normalize();
+                        normal += normals[0] * weights.x;
+                        normal += normals[1] * weights.y;
+                        normal += normals[2] * weights.z;
+                        let intensity = Vector3::dot(&normal.normalize(),&light_dir).max(0.05);
+                        normal.add_scalar_mut(1.0);
+                        normal.mul_assign(0.5);
+                        texture_color.r *= intensity;
+                        texture_color.g *= intensity;
+                        texture_color.b *= intensity;
+                    }
                     target.color[idx] = texture_color.as_u32();
                     target.depth[idx] = depth;
                 }
@@ -211,8 +229,10 @@ fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option
     }
 }
 
-fn draw_line(target: &mut RenderTarget, p1: &Point2<f32>, p2: &Point2<f32>, color: u32) {
+fn draw_line(target: &mut RenderTarget, p1: &Vertex, p2: &Vertex, color: u32) {
     let color_buffer = target.color.as_mut_slice();
+    let p1 = p1.position.xy();
+    let p2 = p2.position.xy();
 
     let screen_size = &Vector2::new(target.width as f32, target.height as f32);
 
