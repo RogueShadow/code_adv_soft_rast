@@ -28,8 +28,12 @@ impl UserState for MyApp {
         match event {
             SoftRastEvent::Render { scene, .. } => {
                 let transform = Isometry3::new(
-                    Vector3::new(-1.0, 0.0, 0.0),
+                    Vector3::new(-2.0, -1.0, 0.0),
                     Vector3::new(0.0, time / 2.0, 0.0),
+                );
+                let transform2 = Isometry3::new(
+                    Vector3::new(2.0,1.0,0.0),
+                    Vector3::new(0.0,-time / 1.5,0.0),
                 );
 
                 if scene.entities.is_empty() {
@@ -37,10 +41,10 @@ impl UserState for MyApp {
                     self.cam = scene.camera;
                     if let Some(model) = self.models.first() {
                         scene.entities.push(Entity::new(
-                            "monkey",
+                            "spyro",
                             model,
                             &transform,
-                            &Scale3::identity(),
+                            &Scale3::new(0.05,0.05,0.05),
                         ));
                     }
                     if let Some(model) = self.models.last() {
@@ -60,6 +64,14 @@ impl UserState for MyApp {
                         .next()
                     {
                         entity.position = transform;
+                    }
+                    if let Some(entity) = scene
+                        .entities
+                        .iter_mut()
+                        .filter(|e| e.id == "spyro".to_string())
+                        .next()
+                    {
+                        entity.position = transform2;
                     }
                 }
             }
@@ -117,7 +129,9 @@ impl UserState for MyApp {
                 }
             }
             SoftRastEvent::Resume {} => {
-                self.models.push(load_model("assets/monkey.obj"));
+                self.models.push(load_model("assets/spyro.obj"));
+                self.models.last_mut().unwrap().texture = Texture::new("assets/SpyroTex.png");
+                
                 self.models.push(load_model("assets/Eevee.obj"));
                 self.models.last_mut().unwrap().texture = Texture::new("assets/EEVEEUV.png");
                 // self.models.push(load_model("assets/spyro.obj"));

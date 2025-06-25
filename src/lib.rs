@@ -259,7 +259,7 @@ impl ApplicationHandler for AppContext {
                         }
                     }
                 }
-
+                
                 window.set_title(&format!(
                     "Software Renderer Windowed {}x{} @ {:?}",
                     width,

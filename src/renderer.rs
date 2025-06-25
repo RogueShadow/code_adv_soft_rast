@@ -1,10 +1,10 @@
 use crate::camera::Camera;
-use crate::geometry::{point_in_triangle, Bounds, Model, Texture, Vertex};
+use crate::geometry::{Bounds, Model, Texture, Vertex, point_in_triangle};
 use nalgebra::{Isometry3, Point2, Point3, Scale3, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use rayon::prelude::*;
-use std::ops::MulAssign;
+use std::ops::{Add, MulAssign};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Debug)]
@@ -232,46 +232,48 @@ pub fn draw_buffer(
     model: &Model,
     mode: &DrawMode,
 ) {
-    let mut screen_vertices = Vec::with_capacity(model.vertices.len());
-    for vertices in model.vertices.chunks(3) {
-        for vertex in vertices {
-            let mvp_mat = camera.get_perspective_matrix()
-                * camera.get_view_matrix()
-                * transform.to_homogeneous()
-                * scale.to_homogeneous();
-            let clip_v = mvp_mat * vertex.position.to_homogeneous();
-            if clip_v.z < camera.near || clip_v.z > camera.far {
-                continue;
+    let mvp_mat = camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous() * scale.to_homogeneous();
+
+    let screen_vertices: Vec<Vertex> = model.vertices
+        .par_chunks(3) // Process in chunks of 3 (triangles)
+        .flat_map(|vertices| {
+            let mut svs = Vec::with_capacity(vertices.len()); // Capacity for all vertices in chunk
+            for vertex in vertices {
+                let clip_v = mvp_mat * vertex.position.to_homogeneous();
+                if clip_v.z < camera.near || clip_v.z > camera.far {
+                    continue;
+                }
+                let ndc_v = if clip_v.w != 0.0 {
+                    clip_v / clip_v.w
+                } else {
+                    clip_v
+                };
+                let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
+                let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
+                let screen_z = ndc_v.z;
+                if screen_x > target.width as f32
+                    || screen_y > target.height as f32
+                    || screen_x < 0.0
+                    || screen_y < 0.0
+                {
+                    continue;
+                }
+                let mut sv = vertex.clone();
+                sv.position = Point3::new(screen_x, screen_y, screen_z);
+                if sv.normal.is_some() {
+                    sv.normal = Some(transform * sv.normal.unwrap());
+                }
+                svs.push(sv);
             }
-            let ndc_v = if clip_v.w != 0.0 {
-                clip_v / clip_v.w
-            } else {
-                clip_v
-            };
-            let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
-            let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
-            let screen_z = ndc_v.z;
-            if screen_x > target.width as f32
-                || screen_y > target.height as f32
-                || screen_x < 0.0
-                || screen_y < 0.0
-            {
-                continue;
-            }
-            let mut sv = vertex.clone();
-            sv.position = Point3::new(screen_x, screen_y, screen_z);
-            if sv.normal.is_some() {
-                sv.normal = Some(transform * sv.normal.unwrap());
-            }
-            screen_vertices.push(sv);
-        }
-    }
+            svs
+        })
+        .collect();
 
     let model = Arc::new(model);
     let color = Color::new(1.0, 1.0, 1.0, 1.0).as_u32();
     let size = 2.0;
     let mut slices = target.create_slices();
-    
+
     slices.par_iter_mut().for_each(|slice| {
         // Process all triangles, filtering pixels by y-range
         for triangle in screen_vertices.as_slice().chunks_exact(3) {
@@ -279,14 +281,14 @@ pub fn draw_buffer(
                 draw_triangle(slice, triangle, model.texture.as_ref());
             }
             if mode.wireframe {
-                draw_line(slice, &triangle[0],&triangle[1],color);
-                draw_line(slice, &triangle[1], &triangle[2],color);
-                draw_line(slice, &triangle[2], &triangle[0],color);
+                draw_line(slice, &triangle[0], &triangle[1], color);
+                draw_line(slice, &triangle[1], &triangle[2], color);
+                draw_line(slice, &triangle[2], &triangle[0], color);
             }
             if mode.points {
-                draw_point(slice, &triangle[0],size,color);
-                draw_point(slice, &triangle[1],size,color);
-                draw_point(slice, &triangle[2],size,color);
+                draw_point(slice, &triangle[0], size, color);
+                draw_point(slice, &triangle[1], size, color);
+                draw_point(slice, &triangle[2], size, color);
             }
         }
     });
