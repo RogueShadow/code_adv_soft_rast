@@ -6,7 +6,7 @@ mod renderer;
 use crate::camera::Camera;
 use crate::geometry::Model;
 use crate::my_app::MyApp;
-use crate::renderer::{draw_buffer, DrawMode, RenderTarget};
+use crate::renderer::{DrawMode, RenderTarget, draw_buffer};
 use nalgebra::{Isometry3, Scale3};
 use rand::Rng;
 use softbuffer::{Context, Surface};
@@ -115,12 +115,14 @@ impl AppContext {
             scene: None,
             timer: Instant::now(),
             input: InputState::default(),
-            draw_mode: DrawMode {shaded: true, wireframe: false, points: false}
+            draw_mode: DrawMode {
+                shaded: true,
+                wireframe: false,
+                points: false,
+            },
         }
     }
 }
-
-
 
 impl ApplicationHandler for AppContext {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -235,7 +237,14 @@ impl ApplicationHandler for AppContext {
                         );
                         let camera = &scene.camera;
                         for entity in &scene.entities {
-                                draw_buffer(target, &entity.position,&entity.scale, camera, &entity.model,&self.draw_mode);
+                            draw_buffer(
+                                target,
+                                &entity.position,
+                                &entity.scale,
+                                camera,
+                                &entity.model,
+                                &self.draw_mode,
+                            );
                         }
                     } else {
                         self.scene = Some(Scene {
@@ -318,7 +327,6 @@ pub fn run() {
         }
     };
 }
-
 
 struct Entity {
     id: String,

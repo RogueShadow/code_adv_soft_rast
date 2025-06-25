@@ -1,11 +1,11 @@
-use std::ops::{DerefMut, MulAssign};
-use std::sync::{Arc, Mutex};
-use nalgebra::{Isometry3, Point2, Point3, Scale3, Vector2, Vector3};
+use crate::camera::Camera;
+use crate::geometry::{point_in_triangle, Bounds, Model, Texture, Vertex};
+use nalgebra::{Isometry3, Point2, Point3, Scale3, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use rayon::prelude::*;
-use crate::camera::Camera;
-use crate::geometry::{point_in_triangle, Bounds, Model, Texture, Vertex};
+use std::ops::MulAssign;
+use std::sync::Arc;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Color {
@@ -58,7 +58,7 @@ pub fn random_color(rng: &mut XorShiftRng) -> Color {
         1.0,
     )
 }
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct DrawMode {
     pub(crate) wireframe: bool,
     pub(crate) shaded: bool,
@@ -73,7 +73,6 @@ impl Default for DrawMode {
         }
     }
 }
-
 
 pub struct RenderTarget {
     pub(crate) color: Vec<u32>,
@@ -97,68 +96,50 @@ impl RenderTarget {
         self.color.fill(self.clear_color);
         self.depth.fill(f32::MAX);
     }
-}
 
-pub fn draw_buffer(
-    target: &mut RenderTarget,
-    transform: &Isometry3<f32>,
-    scale: &Scale3<f32>,
-    camera: &Camera,
-    model: &Model,
-    mode: &DrawMode,
-) {
-    let mut screen_vertices = Vec::with_capacity(model.vertices.len());
-    for vertices in model.vertices.chunks(3) {
-        for vertex in vertices {
-            let mvp_mat =
-                camera.get_perspective_matrix() * camera.get_view_matrix() * transform.to_homogeneous() * scale.to_homogeneous();
-            let clip_v = mvp_mat * vertex.position.to_homogeneous();
-            if clip_v.z < camera.near || clip_v.z > camera.far { continue }
-            let ndc_v = if clip_v.w != 0.0 {
-                clip_v / clip_v.w
-            } else {
-                clip_v
-            };
-            let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
-            let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
-            let screen_z = ndc_v.z;
-            if screen_x > target.width as f32 || screen_y > target.height as f32 || screen_x < 0.0 || screen_y < 0.0
-            {
-                continue;
+    pub fn create_slices(&mut self) -> Vec<RenderSlice> {
+        let num_threads = rayon::current_num_threads();
+        let rows_per_thread = (self.height as usize + num_threads - 1) / num_threads; // Ceiling division
+        let mut slices = Vec::with_capacity(num_threads);
+        let mut remaining_color = &mut self.color[..];
+        let mut remaining_depth = &mut self.depth[..];
+
+        for i in 0..num_threads {
+            let y_start = i * rows_per_thread;
+            let y_end = (y_start + rows_per_thread).min(self.height as usize);
+            if y_start >= self.height as usize {
+                break; // Avoid empty slices for the last thread if height is small
             }
-            let mut sv = vertex.clone();
-            sv.position = Point3::new(screen_x, screen_y, screen_z);
-            if sv.normal.is_some() {
-                sv.normal = Some(transform * sv.normal.unwrap());
-            }
-            screen_vertices.push(sv);
+            let start_idx = y_start * self.width as usize;
+            let end_idx = y_end * self.width as usize;
+            let (color_slice, next_color) = remaining_color.split_at_mut(end_idx - start_idx);
+            let (depth_slice, next_depth) = remaining_depth.split_at_mut(end_idx - start_idx);
+            remaining_color = next_color;
+            remaining_depth = next_depth;
+            slices.push(RenderSlice {
+                color_slice,
+                depth_slice,
+                start: y_start as u32,
+                end: y_end as u32,
+                width: self.width,
+            });
         }
+        slices
     }
-    
-    let color = Color::new(1.0,1.0,1.0,1.0).as_u32();
-    screen_vertices
-        .as_slice()
-        .chunks_exact(3)
-        .for_each(|triangle| {
-            if mode.shaded {
-                draw_triangle(target,triangle,model.texture.as_ref())
-            }
-            if mode.wireframe {
-                draw_line(target,&triangle[0],&triangle[1],color);
-                draw_line(target,&triangle[1],&triangle[2],color);
-                draw_line(target,&triangle[2],&triangle[0],color);
-            }
-            if mode.points {
-                draw_point(target,&triangle[0],2.0,color);
-                draw_point(target,&triangle[1],2.0,color);
-                draw_point(target,&triangle[2],2.0,color);
-            }
-        });
 }
-fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option<&Texture>) {
-    let bounds = Bounds::new(&triangle);
-    for x in bounds.x_range() {
-        for y in bounds.y_range() {
+// Modified draw_triangle to handle a slice of RenderTarget
+fn draw_triangle(
+    slice: &mut RenderSlice, // End of slice's y-range
+    triangle: &[Vertex],
+    texture: Option<&Texture>,
+) {
+    let bounds = Bounds::new(triangle);
+    for y in bounds.y_range() {
+        // Skip pixels outside the slice's y-range
+        if y < slice.start || y >= slice.end {
+            continue;
+        }
+        for x in bounds.x_range() {
             let (in_triangle, weights) = point_in_triangle(
                 &triangle[0].position.xy(),
                 &triangle[1].position.xy(),
@@ -188,9 +169,10 @@ fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option
                 } else {
                     0.0
                 };
-                let idx = (y * target.width + x) as usize;
-                if idx < (target.width * target.height) as usize {
-                    if depth > target.depth[idx] {
+                // Adjust index to be relative to the slice
+                let idx = ((y - slice.start) * slice.width + x) as usize;
+                if idx < slice.color_slice.len() && x >= 0 && x < slice.width {
+                    if depth > slice.depth_slice[idx] {
                         continue;
                     }
                     let mut texture_color = if let Some(texture) = texture {
@@ -200,7 +182,9 @@ fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option
                             tex_coord += uvs[0] * weights.x;
                             tex_coord += uvs[1] * weights.y;
                             tex_coord += uvs[2] * weights.z;
-                            texture.sample(&tex_coord).unwrap_or_else(|| Color::new(0.0,1.0,1.0,1.0))
+                            texture
+                                .sample(&tex_coord)
+                                .unwrap_or_else(|| Color::new(0.0, 1.0, 1.0, 1.0))
                         } else {
                             Color::new(0.0, 0.0, 0.0, 1.0)
                         }
@@ -213,43 +197,108 @@ fn draw_triangle(target: &mut RenderTarget, triangle: &[Vertex], texture: Option
                     let normals = triangle.iter().filter_map(|v| v.normal).collect::<Vec<_>>();
                     let mut normal = Vector3::<f32>::zeros();
                     if normals.len() == 3 {
-                        let light_dir = Vector3::<f32>::new(1.0,1.0,0.0).normalize();
+                        let light_dir = Vector3::<f32>::new(1.0, 1.0, 0.0).normalize();
                         normal += normals[0] * weights.x;
                         normal += normals[1] * weights.y;
                         normal += normals[2] * weights.z;
-                        let intensity = Vector3::dot(&normal.normalize(),&light_dir).max(0.05);
+                        let intensity = Vector3::dot(&normal.normalize(), &light_dir).max(0.05);
                         normal.add_scalar_mut(1.0);
                         normal.mul_assign(0.5);
                         texture_color.r *= intensity;
                         texture_color.g *= intensity;
                         texture_color.b *= intensity;
                     }
-                    target.color[idx] = texture_color.as_u32();
-                    target.depth[idx] = depth;
+                    slice.color_slice[idx] = texture_color.as_u32();
+                    slice.depth_slice[idx] = depth;
                 }
             }
         }
     }
 }
 
-fn draw_line(target: &mut RenderTarget, p1: &Vertex, p2: &Vertex, color: u32) {
-    let color_buffer = target.color.as_mut_slice();
+struct RenderSlice<'a> {
+    color_slice: &'a mut [u32],
+    depth_slice: &'a mut [f32],
+    start: u32,
+    end: u32,
+    width: u32,
+}
+
+pub fn draw_buffer(
+    target: &mut RenderTarget,
+    transform: &Isometry3<f32>,
+    scale: &Scale3<f32>,
+    camera: &Camera,
+    model: &Model,
+    mode: &DrawMode,
+) {
+    let mut screen_vertices = Vec::with_capacity(model.vertices.len());
+    for vertices in model.vertices.chunks(3) {
+        for vertex in vertices {
+            let mvp_mat = camera.get_perspective_matrix()
+                * camera.get_view_matrix()
+                * transform.to_homogeneous()
+                * scale.to_homogeneous();
+            let clip_v = mvp_mat * vertex.position.to_homogeneous();
+            if clip_v.z < camera.near || clip_v.z > camera.far {
+                continue;
+            }
+            let ndc_v = if clip_v.w != 0.0 {
+                clip_v / clip_v.w
+            } else {
+                clip_v
+            };
+            let screen_x = (ndc_v.x + 1.0) * 0.5 * target.width as f32;
+            let screen_y = (1.0 - ndc_v.y) * 0.5 * target.height as f32;
+            let screen_z = ndc_v.z;
+            if screen_x > target.width as f32
+                || screen_y > target.height as f32
+                || screen_x < 0.0
+                || screen_y < 0.0
+            {
+                continue;
+            }
+            let mut sv = vertex.clone();
+            sv.position = Point3::new(screen_x, screen_y, screen_z);
+            if sv.normal.is_some() {
+                sv.normal = Some(transform * sv.normal.unwrap());
+            }
+            screen_vertices.push(sv);
+        }
+    }
+
+    let model = Arc::new(model);
+    let color = Color::new(1.0, 1.0, 1.0, 1.0).as_u32();
+    let size = 2.0;
+    let mut slices = target.create_slices();
+    
+    slices.par_iter_mut().for_each(|slice| {
+        // Process all triangles, filtering pixels by y-range
+        for triangle in screen_vertices.as_slice().chunks_exact(3) {
+            if mode.shaded {
+                draw_triangle(slice, triangle, model.texture.as_ref());
+            }
+            if mode.wireframe {
+                draw_line(slice, &triangle[0],&triangle[1],color);
+                draw_line(slice, &triangle[1], &triangle[2],color);
+                draw_line(slice, &triangle[2], &triangle[0],color);
+            }
+            if mode.points {
+                draw_point(slice, &triangle[0],size,color);
+                draw_point(slice, &triangle[1],size,color);
+                draw_point(slice, &triangle[2],size,color);
+            }
+        }
+    });
+}
+fn draw_line(slice: &mut RenderSlice, p1: &Vertex, p2: &Vertex, color: u32) {
     let p1 = p1.position.xy();
     let p2 = p2.position.xy();
-
-    let screen_size = &Vector2::new(target.width as f32, target.height as f32);
 
     let x0 = p1.x as i32;
     let y0 = p1.y as i32;
     let x1 = p2.x as i32;
     let y1 = p2.y as i32;
-    let width = screen_size.x as usize;
-    let height = screen_size.y as usize;
-
-    let x0 = x0.clamp(0, width as i32 - 1);
-    let y0 = y0.clamp(0, height as i32 - 1);
-    let x1 = x1.clamp(0, width as i32 - 1);
-    let y1 = y1.clamp(0, height as i32 - 1);
 
     let dx = (x1 - x0).abs();
     let dy = -(y1 - y0).abs();
@@ -261,11 +310,11 @@ fn draw_line(target: &mut RenderTarget, p1: &Vertex, p2: &Vertex, color: u32) {
     let mut y = y0;
 
     loop {
-        // Set pixel at (x, y) if within bounds
-        if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-            let index = y as usize * width + x as usize;
-            if index < color_buffer.len() {
-                color_buffer[index] = color;
+        if y >= slice.start as i32 && y < slice.end as i32 && x >= 0 && x < slice.width as i32 {
+            let relative_y = (y - slice.start as i32) as usize;
+            let index = relative_y * slice.width as usize + x as usize;
+            if index < slice.color_slice.len() {
+                slice.color_slice[index] = color;
             }
         }
 
@@ -284,15 +333,18 @@ fn draw_line(target: &mut RenderTarget, p1: &Vertex, p2: &Vertex, color: u32) {
         }
     }
 }
-fn draw_point(target: &mut RenderTarget, point: &Vertex, size: f32, color: u32) {
+fn draw_point(slice: &mut RenderSlice, point: &Vertex, size: f32, color: u32) {
     for x in (point.position.x - size.ceil()) as u32..(point.position.x + size.ceil()) as u32 {
         for y in (point.position.y - size.ceil()) as u32..(point.position.y + size.ceil()) as u32 {
-            let idx = (y * target.width + x) as usize;
-            if idx < (target.width * target.height) as usize {
-                let test_pos = Point2::new(x as f32, y as f32);
-                let pos = point.position.xy();
-                if (test_pos - pos).magnitude() < size {
-                    target.color[idx] = color;
+            if y >= slice.start && y < slice.end && x >= 0 && x < slice.width {
+                let relative_y = (y - slice.start) as usize;
+                let index = relative_y * slice.width as usize + x as usize;
+                if index < slice.color_slice.len() {
+                    let test_pos = Point2::new(x as f32, y as f32);
+                    let pos = point.position.xy();
+                    if (test_pos - pos).magnitude() < size {
+                        slice.color_slice[index] = color;
+                    }
                 }
             }
         }

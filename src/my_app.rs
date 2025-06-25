@@ -1,4 +1,4 @@
-use crate::geometry::{Model, load_model, Texture};
+use crate::geometry::{Model, Texture, load_model};
 use crate::{Camera, Command, Entity, SoftRastEvent, UserState};
 use nalgebra::{Isometry3, Point3, Scale3, Vector3};
 
@@ -29,20 +29,27 @@ impl UserState for MyApp {
             SoftRastEvent::Render { scene, .. } => {
                 let transform = Isometry3::new(
                     Vector3::new(-1.0, 0.0, 0.0),
-                    Vector3::new(0.0, time / 2.0 , 0.0),
+                    Vector3::new(0.0, time / 2.0, 0.0),
                 );
-
 
                 if scene.entities.is_empty() {
                     scene.camera.position = Point3::new(0.0, 0.0, -10.0);
                     self.cam = scene.camera;
                     if let Some(model) = self.models.first() {
-                        scene.entities.push(Entity::new("monkey", model, &transform, &Scale3::identity()));
+                        scene.entities.push(Entity::new(
+                            "monkey",
+                            model,
+                            &transform,
+                            &Scale3::identity(),
+                        ));
                     }
                     if let Some(model) = self.models.last() {
-                        scene
-                            .entities
-                            .push(Entity::new("eevee", model, &transform, &Scale3::identity()));
+                        scene.entities.push(Entity::new(
+                            "eevee",
+                            model,
+                            &transform,
+                            &Scale3::identity(),
+                        ));
                     }
                 } else {
                     scene.camera = self.cam;

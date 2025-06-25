@@ -1,8 +1,8 @@
+use crate::renderer::Color;
+use image::{DynamicImage, GenericImageView, Rgba};
 use nalgebra::{Point2, Point3, Vector2, Vector3};
 use std::fs::read_to_string;
 use std::ops::RangeInclusive;
-use image::{DynamicImage, GenericImageView, Rgba};
-use crate::renderer::{Color};
 
 #[derive(Debug, Clone)]
 pub struct Texture {
@@ -11,9 +11,9 @@ pub struct Texture {
 impl Texture {
     pub fn new(path: &str) -> Option<Texture> {
         match image::open(path) {
-            Ok(image) => {
-                Some(Texture {texture: image.to_owned()})
-            }
+            Ok(image) => Some(Texture {
+                texture: image.to_owned(),
+            }),
             Err(err) => {
                 println!("{}", err);
                 None
@@ -25,13 +25,12 @@ impl Texture {
     pub fn sample(&self, tex_coord: &Point2<f32>) -> Option<Color> {
         let width = self.texture.width();
         let height = self.texture.height();
-        let x = (tex_coord.x.clamp(0.0,1.0) * (width as f32 - 1.0)).round() as u32;
-        let y = ((1.0 -tex_coord.y.clamp(0.0,1.0)) * (height as f32 - 1.0)).round() as u32;
-        
-        if (0..self.texture.width()).contains(&x) &&
-            (0..self.texture.height()).contains(&y) {
-            let Rgba([r,g,b,a]) = self.texture.get_pixel(x,y);
-            Some(Color::from_rgba(r,g,b,a))        
+        let x = (tex_coord.x.clamp(0.0, 1.0) * (width as f32 - 1.0)).round() as u32;
+        let y = ((1.0 - tex_coord.y.clamp(0.0, 1.0)) * (height as f32 - 1.0)).round() as u32;
+
+        if (0..self.texture.width()).contains(&x) && (0..self.texture.height()).contains(&y) {
+            let Rgba([r, g, b, a]) = self.texture.get_pixel(x, y);
+            Some(Color::from_rgba(r, g, b, a))
         } else {
             None
         }
@@ -52,7 +51,7 @@ impl Model {
     }
 }
 pub fn load_model(file: &str) -> Model {
-    let color = Color::new(1.0,1.0,1.0,1.0);
+    let color = Color::new(1.0, 1.0, 1.0, 1.0);
     let file = match read_to_string(file) {
         Ok(file) => file,
         Err(err) => panic!("{}", err),
@@ -110,7 +109,7 @@ pub fn load_model(file: &str) -> Model {
             }
         }
     }
-    
+
     for face in faces {
         match face.len() {
             3 => {
