@@ -4,11 +4,10 @@ mod my_app;
 mod renderer;
 
 use crate::camera::Camera;
-use crate::geometry::{Model, Texture};
+use crate::geometry::Model;
 use crate::my_app::MyApp;
-use crate::renderer::{DrawMode, RenderTarget, draw_buffer, Color};
-use nalgebra::{Isometry3, Point2, Scale3, Vector3};
-use rand::Rng;
+use crate::renderer::{draw_buffer, DrawMode, Material, RenderTarget, Shader};
+use nalgebra::{Isometry3, Scale3};
 use softbuffer::{Context, Surface};
 use std::collections::HashSet;
 use std::num::NonZeroU32;
@@ -21,7 +20,6 @@ use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
-use crate::Material::Textured;
 
 const WIDTH: f32 = 1600.0;
 const HEIGHT: f32 = 900.0;
@@ -238,15 +236,7 @@ impl ApplicationHandler for AppContext {
                         );
                         let camera = &scene.camera;
                         for entity in &scene.entities {
-                            draw_buffer(
-                                target,
-                                &entity.position,
-                                &entity.scale,
-                                camera,
-                                &entity.model,
-                                &entity.material,
-                                &self.draw_mode,
-                            );
+                            draw_buffer(target, &entity, camera, &self.draw_mode);
                         }
                     } else {
                         self.scene = Some(Scene {
@@ -261,7 +251,7 @@ impl ApplicationHandler for AppContext {
                         }
                     }
                 }
-                
+
                 window.set_title(&format!(
                     "Software Renderer Windowed {}x{} @ {:?}",
                     width,
@@ -329,33 +319,27 @@ pub fn run() {
         }
     };
 }
-pub enum Material {
-    SolidColor(Color),
-    VertexColors,
-    Textured(Texture),
-    LitTexture {
-        texture: Texture,
-        light_dir: Vector3<f32>,
-    },
-    LitSolid {
-        color: Color,
-        light_dir: Vector3<f32>,
-    }
-}
+
 
 struct Entity {
     id: String,
     model: Model,
-    material: Material,
+    shader: Box<dyn Shader>,
     position: Isometry3<f32>,
     scale: Scale3<f32>,
 }
 impl Entity {
-    pub fn new(id: &str, model: &Model, position: &Isometry3<f32>, scale: &Scale3<f32>, material: Material) -> Self {
+    pub fn new(
+        id: &str,
+        model: &Model,
+        position: &Isometry3<f32>,
+        scale: &Scale3<f32>,
+        shader: impl Shader + 'static,
+    ) -> Self {
         Self {
             id: id.to_string(),
             model: model.to_owned(),
-            material,
+            shader: Box::new(shader),
             position: position.clone(),
             scale: scale.to_owned(),
         }

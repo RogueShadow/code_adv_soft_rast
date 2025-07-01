@@ -252,12 +252,10 @@ impl Bounds {
     }
 }
 
-pub fn point_in_triangle(
-    a: &Point2<f32>,
-    b: &Point2<f32>,
-    c: &Point2<f32>,
-    p: &Point2<f32>,
-) -> (bool, Vector3<f32>) {
+pub fn point_in_triangle(triangle: &[Vertex], p: &Point2<f32>) -> (bool, Vector3<f32>) {
+    let a = triangle[0].position.xy();
+    let b = triangle[1].position.xy();
+    let c = triangle[2].position.xy();
     let area_abp = signed_area(&a, &b, p);
     let area_bcp = signed_area(&b, &c, p);
     let area_cap = signed_area(&c, &a, p);
@@ -308,7 +306,10 @@ impl Vertex {
     }
     pub fn world_to_clip(&self, mvp_mat: &Matrix4<f32>) -> Vertex {
         let mut v = self.clone();
-        v.position = mvp_mat.transform_point(&v.position.xyz()).to_homogeneous().into();
+        v.position = mvp_mat
+            .transform_point(&v.position.xyz())
+            .to_homogeneous()
+            .into();
         v
     }
     pub fn clip_to_ndc(&self) -> Vertex {
@@ -321,7 +322,7 @@ impl Vertex {
         v.position = position;
         v
     }
-    pub fn ndc_to_screen(&self, size: (u32,u32)) -> Vertex {
+    pub fn ndc_to_screen(&self, size: (u32, u32)) -> Vertex {
         let mut v = self.clone();
         v.position.x = (v.position.x + 1.0) * 0.5 * size.0 as f32;
         v.position.y = (1.0 - v.position.y) * 0.5 * size.1 as f32;
@@ -330,7 +331,7 @@ impl Vertex {
     pub fn update_normal(&self, model_mat: &Isometry3<f32>) -> Vertex {
         if let Some(normal) = self.normal {
             let mut v = self.clone();
-            v.normal = Some(model_mat.transform_vector(&normal));
+            v.normal = Some(model_mat.transform_vector(&normal).normalize());
             v
         } else {
             self.clone()

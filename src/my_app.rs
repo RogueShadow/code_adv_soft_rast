@@ -1,7 +1,6 @@
 use crate::geometry::{Model, Texture, load_model};
 use crate::{Camera, Command, Entity, Material, SoftRastEvent, UserState};
-use nalgebra::{Isometry3, Point3, Rotation3, Scale3, Translation, Translation3, Vector3};
-use crate::renderer::Color;
+use nalgebra::{Isometry3, Point3, Scale3, Vector3};
 
 pub struct MyApp {
     pub models: Vec<Model>,
@@ -33,8 +32,8 @@ impl UserState for MyApp {
                     Vector3::new(0.0, time / 2.0, 0.0),
                 );
                 let transform2 = Isometry3::new(
-                    Vector3::new(2.0,1.0,0.0),
-                    Vector3::new(0.0,-time / 1.5,0.0),
+                    Vector3::new(2.0, 1.0, 0.0),
+                    Vector3::new(0.0, -time / 1.5, 0.0),
                 );
 
                 if scene.entities.is_empty() {
@@ -46,10 +45,10 @@ impl UserState for MyApp {
                             "spyro",
                             model,
                             &transform,
-                            &Scale3::new(0.05,0.05,0.05),
+                            &Scale3::new(0.05, 0.05, 0.05),
                             Material::LitTexture {
                                 texture: Texture::new("assets/SpyroTex.png").unwrap(),
-                                light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize()
+                                light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize(),
                             },
                         ));
                     }
@@ -58,13 +57,12 @@ impl UserState for MyApp {
                             "floor",
                             model,
                             &transform,
-                            &Scale3::new(1.0,1.0,1.0),
+                            &Scale3::new(1.0, 1.0, 1.0),
                             Material::LitTexture {
                                 texture: Texture::new("assets/Grass.png").unwrap(),
                                 light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize(),
-                            }
-                        )
-                        )
+                            },
+                        ))
                     }
                     // if let Some(model) = models.next() {
                     //     scene.entities.push(Entity::new(
@@ -151,7 +149,6 @@ impl UserState for MyApp {
                 self.models.push(load_model("assets/spyro.obj"));
 
                 self.models.push(load_model("assets/floor.obj"));
-
             }
         }
     }
