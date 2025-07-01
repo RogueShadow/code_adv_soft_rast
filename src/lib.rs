@@ -6,7 +6,7 @@ mod renderer;
 use crate::camera::Camera;
 use crate::geometry::Model;
 use crate::my_app::MyApp;
-use crate::renderer::{draw_buffer, DrawMode, Material, RenderTarget, Shader};
+use crate::renderer::{DrawMode, Material, RenderTarget, Shader, draw_buffer};
 use nalgebra::{Isometry3, Scale3};
 use softbuffer::{Context, Surface};
 use std::collections::HashSet;
@@ -319,7 +319,6 @@ pub fn run() {
         }
     };
 }
-
 
 struct Entity {
     id: String,

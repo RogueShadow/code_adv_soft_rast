@@ -1,6 +1,6 @@
+use crate::Entity;
 use crate::camera::Camera;
-use crate::geometry::{Bounds, Vertex, point_in_triangle, Texture};
-use crate::{Entity};
+use crate::geometry::{Bounds, Texture, Vertex, point_in_triangle};
 use nalgebra::{Point2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
@@ -215,14 +215,10 @@ impl Shader for Material {
     fn shade(&self, triangle: &[Vertex], weights: &Vector3<f32>) -> Color {
         match self {
             Self::SolidColor(color) => color.clone(),
-            Self::VertexColors => {
-                match (triangle[0].color, triangle[1].color, triangle[2].color) {
-                    (Some(c1), Some(c2), Some(c3)) => {
-                        c1.interpolate(&c2, &c3, &weights)
-                    }
-                    _ => Color::new(1.0, 1.0, 1.0, 1.0),
-                }
-            }
+            Self::VertexColors => match (triangle[0].color, triangle[1].color, triangle[2].color) {
+                (Some(c1), Some(c2), Some(c3)) => c1.interpolate(&c2, &c3, &weights),
+                _ => Color::new(1.0, 1.0, 1.0, 1.0),
+            },
             Self::Textured(texture) => {
                 if let Some(uv) = calculate_uvs(&triangle, &weights) {
                     if let Some(color) = texture.sample(&uv) {
@@ -236,24 +232,21 @@ impl Shader for Material {
             }
             Self::LitTexture { texture, light_dir } => {
                 let uv = calculate_uvs(&triangle, &weights);
-                let mut color = if let Some(color) =
-                    texture.sample(&uv.unwrap_or(Point2::origin()))
+                let mut color = if let Some(color) = texture.sample(&uv.unwrap_or(Point2::origin()))
                 {
                     color
                 } else {
                     Color::new(1.0, 1.0, 1.0, 1.0)
                 };
                 if let Some(normal) = calculate_normals(&triangle, &weights) {
-                    color =
-                        color.scalar_mul(Vector3::dot(&normal, &light_dir).max(0.01));
+                    color = color.scalar_mul(Vector3::dot(&normal, &light_dir).max(0.01));
                 }
                 color
             }
             Self::LitSolid { color, light_dir } => {
                 let mut color = color.clone();
                 if let Some(normal) = calculate_normals(&triangle, &weights) {
-                    color =
-                        color.scalar_mul(Vector3::dot(&normal, &light_dir).max(0.01));
+                    color = color.scalar_mul(Vector3::dot(&normal, &light_dir).max(0.01));
                 }
                 color
             }
