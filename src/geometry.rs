@@ -1,6 +1,6 @@
 use crate::renderer::Color;
 use image::{DynamicImage, GenericImageView, Rgba};
-use nalgebra::{Point2, Point3, Vector2, Vector3};
+use nalgebra::{Isometry3, Matrix4, Point2, Point3, Point4, Vector2, Vector3};
 use std::fs::read_to_string;
 use std::ops::RangeInclusive;
 
@@ -40,13 +40,11 @@ impl Texture {
 #[derive(Clone)]
 pub struct Model {
     pub vertices: Vec<Vertex>,
-    pub texture: Option<Texture>,
 }
 impl Model {
     pub fn from_vertices(vertices: &[Vertex]) -> Model {
         Self {
             vertices: vertices.to_vec(),
-            texture: None,
         }
     }
 }
@@ -286,7 +284,7 @@ pub fn perpendicular_vector(v: &Vector2<f32>) -> Vector2<f32> {
 
 #[derive(Default, Clone)]
 pub struct Vertex {
-    pub position: Point3<f32>,
+    pub position: Point4<f32>,
     pub normal: Option<Vector3<f32>>,
     pub color: Option<Color>,
     pub uv: Option<Vector2<f32>>,
@@ -294,7 +292,7 @@ pub struct Vertex {
 impl Vertex {
     pub fn new(position: Point3<f32>) -> Self {
         Self {
-            position,
+            position: position.to_homogeneous().into(),
             normal: None,
             color: None,
             uv: None,
@@ -307,5 +305,35 @@ impl Vertex {
     pub fn with_uv(mut self, uv: Vector2<f32>) -> Self {
         self.uv = Some(uv);
         self
+    }
+    pub fn world_to_clip(&self, mvp_mat: &Matrix4<f32>) -> Vertex {
+        let mut v = self.clone();
+        v.position = mvp_mat.transform_point(&v.position.xyz()).to_homogeneous().into();
+        v
+    }
+    pub fn clip_to_ndc(&self) -> Vertex {
+        let mut v = self.clone();
+        let position = if v.position.w != 0.0 {
+            v.position / v.position.w
+        } else {
+            v.position
+        };
+        v.position = position;
+        v
+    }
+    pub fn ndc_to_screen(&self, size: (u32,u32)) -> Vertex {
+        let mut v = self.clone();
+        v.position.x = (v.position.x + 1.0) * 0.5 * size.0 as f32;
+        v.position.y = (1.0 - v.position.y) * 0.5 * size.1 as f32;
+        v
+    }
+    pub fn update_normal(&self, model_mat: &Isometry3<f32>) -> Vertex {
+        if let Some(normal) = self.normal {
+            let mut v = self.clone();
+            v.normal = Some(model_mat.transform_vector(&normal));
+            v
+        } else {
+            self.clone()
+        }
     }
 }

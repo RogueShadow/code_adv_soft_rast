@@ -1,6 +1,7 @@
 use crate::geometry::{Model, Texture, load_model};
-use crate::{Camera, Command, Entity, SoftRastEvent, UserState};
-use nalgebra::{Isometry3, Point3, Scale3, Vector3};
+use crate::{Camera, Command, Entity, Material, SoftRastEvent, UserState};
+use nalgebra::{Isometry3, Point3, Rotation3, Scale3, Translation, Translation3, Vector3};
+use crate::renderer::Color;
 
 pub struct MyApp {
     pub models: Vec<Model>,
@@ -39,22 +40,40 @@ impl UserState for MyApp {
                 if scene.entities.is_empty() {
                     scene.camera.position = Point3::new(0.0, 0.0, -10.0);
                     self.cam = scene.camera;
-                    if let Some(model) = self.models.first() {
+                    let mut models = self.models.iter();
+                    if let Some(model) = models.next() {
                         scene.entities.push(Entity::new(
                             "spyro",
                             model,
                             &transform,
                             &Scale3::new(0.05,0.05,0.05),
+                            Material::LitTexture {
+                                texture: Texture::new("assets/SpyroTex.png").unwrap(),
+                                light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize()
+                            },
                         ));
                     }
-                    if let Some(model) = self.models.last() {
+                    if let Some(model) = models.next() {
                         scene.entities.push(Entity::new(
-                            "eevee",
+                            "floor",
                             model,
                             &transform,
-                            &Scale3::identity(),
-                        ));
+                            &Scale3::new(1.0,1.0,1.0),
+                            Material::LitTexture {
+                                texture: Texture::new("assets/Grass.png").unwrap(),
+                                light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize(),
+                            }
+                        )
+                        )
                     }
+                    // if let Some(model) = models.next() {
+                    //     scene.entities.push(Entity::new(
+                    //         "eevee",
+                    //         model,
+                    //         &transform,
+                    //         &Scale3::identity(),
+                    //     ));
+                    // }
                 } else {
                     scene.camera = self.cam;
                     if let Some(entity) = scene
@@ -130,12 +149,9 @@ impl UserState for MyApp {
             }
             SoftRastEvent::Resume {} => {
                 self.models.push(load_model("assets/spyro.obj"));
-                self.models.last_mut().unwrap().texture = Texture::new("assets/SpyroTex.png");
-                
-                self.models.push(load_model("assets/Eevee.obj"));
-                self.models.last_mut().unwrap().texture = Texture::new("assets/EEVEEUV.png");
-                // self.models.push(load_model("assets/spyro.obj"));
-                // self.models.last_mut().unwrap().texture = Texture::new("assets/SpyroTex.png");
+
+                self.models.push(load_model("assets/floor.obj"));
+
             }
         }
     }
