@@ -213,7 +213,7 @@ pub struct Bounds {
     pub max_y: f32,
 }
 impl Bounds {
-    pub fn new<T: AsRef<[Vertex]>>(points: T) -> Self {
+    pub fn new<T: AsRef<[Vertex]>>(points: T, screen: (u32,u32)) -> Self {
         let points = points.as_ref();
         if points.is_empty() {
             return Self {
@@ -231,10 +231,10 @@ impl Bounds {
         let mut max_y = first.position.y;
 
         for point in points.iter().skip(1) {
-            min_x = min_x.min(point.position.x);
-            min_y = min_y.min(point.position.y);
-            max_x = max_x.max(point.position.x);
-            max_y = max_y.max(point.position.y);
+            min_x = min_x.min(point.position.x).max(0.0);
+            min_y = min_y.min(point.position.y).max( 0.0);
+            max_x = max_x.max(point.position.x).min(screen.0 as f32);
+            max_y = max_y.max(point.position.y).min(screen.1 as f32);
         }
 
         Self {
@@ -303,6 +303,16 @@ impl Vertex {
     pub fn with_uv(mut self, uv: Vector2<f32>) -> Self {
         self.uv = Some(uv);
         self
+    }
+    pub fn model_to_view(&self, mv_mat: &Matrix4<f32>) -> Vertex {
+        let mut v = self.clone();
+        v.position = mv_mat.transform_point(&v.position.xyz()).to_homogeneous().into();
+        v
+    }
+    pub fn view_to_clip(&self, v_mat: &Matrix4<f32>) -> Vertex {
+        let mut v = self.clone();
+        v.position = v_mat.transform_point(&v.position.xyz()).to_homogeneous().into();
+        v
     }
     pub fn world_to_clip(&self, mvp_mat: &Matrix4<f32>) -> Vertex {
         let mut v = self.clone();

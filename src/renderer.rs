@@ -130,6 +130,7 @@ impl RenderTarget {
                 start: y_start as u32,
                 end: y_end as u32,
                 width: self.width,
+                height: self.height,
             });
         }
         slices
@@ -192,6 +193,7 @@ pub struct RenderSlice<'a> {
     start: u32,
     end: u32,
     width: u32,
+    height: u32,
 }
 
 pub enum Material {
@@ -254,28 +256,34 @@ impl Shader for Material {
     }
 }
 
+pub fn clip_triangle(triangle: &[Vertex], camera: &Camera) -> Vec<Vertex> {
+    let clip0 = triangle[0].position.z < camera.near;
+    let clip1 = triangle[1].position.z < camera.near;
+    let clip2 = triangle[2].position.z < camera.near;
+    let clipped_triangle = match [clip0,clip1,clip2] {
+        [true,true,true] => triangle.to_vec(),
+        _ => Vec::new(),
+    };
+    clipped_triangle
+}
+
 pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, mode: &DrawMode) {
-    let mvp_mat = camera.get_perspective_matrix()
-        * camera.get_view_matrix()
-        * entity.position.to_homogeneous()
-        * entity.scale.to_homogeneous();
+    let mv_mat = camera.get_view_matrix() * entity.position.to_homogeneous() * entity.scale.to_homogeneous();
+    let p_mat = camera.get_perspective_matrix();
     let screen_vertices: Vec<Vertex> = entity
         .model
         .vertices
         .par_chunks(3)
         .flat_map(|triangle| {
-            let vertices: Vec<_> = triangle
+            let view_space = triangle.iter().map(|v| v.model_to_view(&mv_mat)).collect::<Vec<_>>();
+            let view_space = clip_triangle(view_space.as_slice(),&camera);
+            let vertices: Vec<_> = view_space
                 .iter()
-                .map(|v| v.world_to_clip(&mvp_mat))
+                .map(|v| v.view_to_clip(&p_mat))
                 .map(|v| v.clip_to_ndc())
                 .map(|v| v.ndc_to_screen((target.width, target.height)))
                 .collect::<Vec<_>>();
-            let is_visible = vertices
-                .iter()
-                .all(|v| v.position.x < target.width as f32 && v.position.y < target.height as f32);
-            if !is_visible {
-                return vec![];
-            }
+
             let finished_v = vertices
                 .iter()
                 .map(|v| v.update_normal(&entity.position))
@@ -305,7 +313,7 @@ pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, 
 }
 
 fn draw_triangle(slice: &mut RenderSlice, triangle: &[Vertex], shader: &Box<dyn Shader>) {
-    let bounds = Bounds::new(triangle);
+    let bounds = Bounds::new(triangle,(slice.width,slice.height));
     for y in bounds.y_range() {
         if y < slice.start || y >= slice.end {
             continue;
