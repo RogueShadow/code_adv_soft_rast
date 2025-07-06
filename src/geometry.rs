@@ -213,7 +213,7 @@ pub struct Bounds {
     pub max_y: f32,
 }
 impl Bounds {
-    pub fn new<T: AsRef<[Vertex]>>(points: T, screen: (u32,u32)) -> Self {
+    pub fn new<T: AsRef<[Vertex]>>(points: T, screen: (u32, u32)) -> Self {
         let points = points.as_ref();
         if points.is_empty() {
             return Self {
@@ -231,17 +231,17 @@ impl Bounds {
         let mut max_y = first.position.y;
 
         for point in points.iter().skip(1) {
-            min_x = min_x.min(point.position.x).max(0.0);
-            min_y = min_y.min(point.position.y).max( 0.0);
-            max_x = max_x.max(point.position.x).min(screen.0 as f32);
-            max_y = max_y.max(point.position.y).min(screen.1 as f32);
+            min_x = min_x.min(point.position.x);
+            min_y = min_y.min(point.position.y);
+            max_x = max_x.max(point.position.x);
+            max_y = max_y.max(point.position.y);
         }
 
         Self {
-            min_x,
-            min_y,
-            max_x,
-            max_y,
+            min_x: min_x.max(0.0),
+            min_y: min_y.max(0.0),
+            max_x: max_x.min(screen.0 as f32),
+            max_y: max_y.min(screen.1 as f32),
         }
     }
     pub fn x_range(&self) -> RangeInclusive<u32> {
@@ -251,15 +251,24 @@ impl Bounds {
         self.min_y as u32..=self.max_y as u32
     }
 }
-
-pub fn point_in_triangle(triangle: &[Vertex], p: &Point2<f32>) -> (bool, Vector3<f32>) {
+pub fn point_in_triangle(triangle: &[Vertex], p: &Point2<f32>) -> bool {
+    let edge1 = edge_cross(&triangle[0].position.xy(), &triangle[2].position.xy(), p);
+    let edge2 = edge_cross(&triangle[2].position.xy(), &triangle[1].position.xy(), p);
+    let edge3 = edge_cross(&triangle[1].position.xy(), &triangle[0].position.xy(), p);
+    edge1 >= 0.0 && edge2 >= 0.0 && edge3 >= 0.0
+}
+pub fn edge_cross(a: &Point2<f32>, b: &Point2<f32>, p: &Point2<f32>) -> f32 {
+    let ab = b - a;
+    let ap = p - a;
+    ab.x * ap.y - ab.y * ap.x
+}
+pub fn triangle_barycentric(triangle: &[Vertex], p: &Point2<f32>) -> Vector3<f32> {
     let a = triangle[0].position.xy();
     let b = triangle[1].position.xy();
     let c = triangle[2].position.xy();
     let area_abp = signed_area(&a, &b, p);
     let area_bcp = signed_area(&b, &c, p);
     let area_cap = signed_area(&c, &a, p);
-    let in_triangle = area_abp >= 0.0 && area_bcp >= 0.0 && area_cap >= 0.0;
 
     let inv_area_sum = 1.0 / (area_abp + area_bcp + area_cap);
     let weight_a = area_bcp * inv_area_sum;
@@ -267,8 +276,9 @@ pub fn point_in_triangle(triangle: &[Vertex], p: &Point2<f32>) -> (bool, Vector3
     let weight_c = area_abp * inv_area_sum;
     let weights = Vector3::new(weight_a, weight_b, weight_c);
 
-    (in_triangle, weights)
+    weights
 }
+
 pub fn signed_area(a: &Point2<f32>, b: &Point2<f32>, c: &Point2<f32>) -> f32 {
     let ac = c - a;
     let ab_perp = perpendicular_vector(&(b - a));
@@ -306,13 +316,27 @@ impl Vertex {
     }
     pub fn model_to_view(&self, mv_mat: &Matrix4<f32>) -> Vertex {
         let mut v = self.clone();
-        v.position = mv_mat.transform_point(&v.position.xyz()).to_homogeneous().into();
+        v.position = mv_mat
+            .transform_point(&v.position.xyz())
+            .to_homogeneous()
+            .into();
         v
+    }
+    pub fn model_to_view_mut(&mut self, mv_mat: &Matrix4<f32>) -> &mut Self {
+        self.position = mv_mat.transform_point(&self.position.xyz()).to_homogeneous().into();
+        self
     }
     pub fn view_to_clip(&self, v_mat: &Matrix4<f32>) -> Vertex {
         let mut v = self.clone();
-        v.position = v_mat.transform_point(&v.position.xyz()).to_homogeneous().into();
+        v.position = v_mat
+            .transform_point(&v.position.xyz())
+            .to_homogeneous()
+            .into();
         v
+    }
+    pub fn view_to_clip_mut(&mut self, v_mat: &Matrix4<f32>) -> &mut Self {
+        self.position = v_mat.transform_point(&self.position.xyz()).to_homogeneous().into();
+        self
     }
     pub fn world_to_clip(&self, mvp_mat: &Matrix4<f32>) -> Vertex {
         let mut v = self.clone();
@@ -321,6 +345,10 @@ impl Vertex {
             .to_homogeneous()
             .into();
         v
+    }
+    pub fn world_to_clip_mut(&mut self, mvp_mat: &Matrix4<f32>) -> &mut Self {
+        self.position = mvp_mat.transform_point(&self.position.xyz()).to_homogeneous().into();
+        self
     }
     pub fn clip_to_ndc(&self) -> Vertex {
         let mut v = self.clone();
@@ -332,11 +360,24 @@ impl Vertex {
         v.position = position;
         v
     }
+    pub fn clip_to_ndc_mut(&mut self) -> &mut Self {
+        self.position = if self.position.w != 0.0 {
+            self.position / self.position.w
+        } else {
+            self.position
+        };
+        self
+    }
     pub fn ndc_to_screen(&self, size: (u32, u32)) -> Vertex {
         let mut v = self.clone();
         v.position.x = (v.position.x + 1.0) * 0.5 * size.0 as f32;
         v.position.y = (1.0 - v.position.y) * 0.5 * size.1 as f32;
         v
+    }
+    pub fn ndc_to_screen_mut(&mut self, size: (u32, u32)) -> &mut Self {
+        self.position.x = (self.position.x + 1.0) * 0.5 * size.0 as f32;
+        self.position.y = (1.0 - self.position.y) * 0.5 * size.1 as f32;
+        self
     }
     pub fn update_normal(&self, model_mat: &Isometry3<f32>) -> Vertex {
         if let Some(normal) = self.normal {
@@ -346,5 +387,11 @@ impl Vertex {
         } else {
             self.clone()
         }
+    }
+    pub fn update_normal_mut(&mut self, model_mat: &Isometry3<f32>) -> &mut Self {
+        if let Some(normal) = self.normal {
+            self.normal = Some(model_mat.transform_vector(&normal).normalize());
+        }
+        self
     }
 }
