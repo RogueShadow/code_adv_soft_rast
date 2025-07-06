@@ -64,14 +64,18 @@ impl UserState for MyApp {
                             },
                         ))
                     }
-                    // if let Some(model) = models.next() {
-                    //     scene.entities.push(Entity::new(
-                    //         "eevee",
-                    //         model,
-                    //         &transform,
-                    //         &Scale3::identity(),
-                    //     ));
-                    // }
+                    if let Some(model) = models.next() {
+                        scene.entities.push(Entity::new(
+                            "eevee",
+                            model,
+                            &transform,
+                            &Scale3::identity(),
+                            Material::LitTexture {
+                                texture: Texture::new("assets/EEVEEUV.png").unwrap(),
+                                light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize(),
+                            }
+                        ));
+                    }
                 } else {
                     scene.camera = self.cam;
                     if let Some(entity) = scene
@@ -149,6 +153,8 @@ impl UserState for MyApp {
                 self.models.push(load_model("assets/spyro.obj"));
 
                 self.models.push(load_model("assets/floor.obj"));
+
+                self.models.push(load_model("assets/Eevee.obj"));
             }
         }
     }
