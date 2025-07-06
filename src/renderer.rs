@@ -1,10 +1,11 @@
 use crate::Entity;
 use crate::camera::Camera;
-use crate::geometry::{Bounds, Texture, Vertex, point_in_triangle};
+use crate::geometry::{Bounds, Texture, Vertex, point_in_triangle, triangle_barycentric};
 use nalgebra::{Point2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
 use rayon::prelude::*;
+use std::ops::Mul;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Color {
@@ -47,11 +48,16 @@ impl Color {
         let blue = (self.b * 255.0) as u32;
         blue | (green << 8) | (red << 16)
     }
-    pub fn scalar_mul(&self, scalar: f32) -> Color {
-        Color {
-            r: self.r * scalar,
-            g: self.g * scalar,
-            b: self.b * scalar,
+}
+
+impl Mul<f32> for Color {
+    type Output = Color;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Self {
+            r: self.r * rhs,
+            g: self.g * rhs,
+            b: self.b * rhs,
             a: self.a,
         }
     }
@@ -88,6 +94,7 @@ pub struct RenderTarget {
     width: u32,
     height: u32,
     clear_color: u32,
+    vertex_buffer: Vec<Vertex>,
 }
 
 impl RenderTarget {
@@ -98,6 +105,7 @@ impl RenderTarget {
             width,
             height,
             clear_color: u32::MIN,
+            vertex_buffer: vec![],
         }
     }
     pub fn clear(&mut self) {
@@ -137,54 +145,40 @@ impl RenderTarget {
     }
 }
 fn calculate_uvs(triangle: &[Vertex], weights: &Vector3<f32>) -> Option<Point2<f32>> {
-    let uvs = triangle.iter().filter_map(|v| v.uv).collect::<Vec<_>>();
+    let uv0 = triangle[0].uv?;
+    let uv1 = triangle[1].uv?;
+    let uv2 = triangle[2].uv?;
     let mut uv = Point2::<f32>::origin();
-    if uvs.len() == 3 {
-        uv += uvs[0] * weights.x;
-        uv += uvs[1] * weights.y;
-        uv += uvs[2] * weights.z;
-        Some(uv)
-    } else {
-        None
-    }
+    uv += uv0 * weights.x;
+    uv += uv1 * weights.y;
+    uv += uv2 * weights.z;
+    Some(uv)
 }
 fn calculate_normals(triangle: &[Vertex], weights: &Vector3<f32>) -> Option<Vector3<f32>> {
-    let normals = triangle.iter().filter_map(|v| v.normal).collect::<Vec<_>>();
+    let n0 = triangle[0].normal?;
+    let n1 = triangle[1].normal?;
+    let n2 = triangle[2].normal?;
     let mut normal = Vector3::<f32>::zeros();
-    if normals.len() == 3 {
-        normal += normals[0] * weights.x;
-        normal += normals[1] * weights.y;
-        normal += normals[2] * weights.z;
-        Some(normal.normalize())
-    } else {
-        None
-    }
+    normal += n0 * weights.x;
+    normal += n1 * weights.y;
+    normal += n2 * weights.z;
+    Some(normal.normalize())
 }
 
-fn calculate_depths(triangle: &[Vertex], weights: &Vector3<f32>) -> (f32, Vector3<f32>) {
-    let depths = Vector3::new(
-        if triangle[0].position.z.abs() > 1e-6 {
-            1.0 / triangle[0].position.z
-        } else {
-            0.0
-        },
-        if triangle[1].position.z.abs() > 1e-6 {
-            1.0 / triangle[1].position.z
-        } else {
-            0.0
-        },
-        if triangle[2].position.z.abs() > 1e-6 {
-            1.0 / triangle[2].position.z
-        } else {
-            0.0
-        },
-    );
-    let depth = if depths.dot(&weights).abs() > 1e-6 {
-        1.0 / depths.dot(&weights)
+const EPSILON: f32 = 1e-6;
+
+fn calculate_depths(triangle: &[Vertex], weights: &Vector3<f32>) -> f32 {
+    let z0 = triangle[0].position.z;
+    let z1 = triangle[1].position.z;
+    let z2 = triangle[2].position.z;
+
+    let denominator = weights.x / z0 + weights.y / z1 + weights.z / z2;
+
+    if denominator.abs() > EPSILON {
+        1.0 / denominator
     } else {
         0.0
-    };
-    (depth, depths)
+    }
 }
 
 pub struct RenderSlice<'a> {
@@ -199,7 +193,9 @@ pub struct RenderSlice<'a> {
 pub enum Material {
     SolidColor(Color),
     VertexColors,
-    Textured(Texture),
+    Textured {
+        texture: Texture,
+    },
     LitTexture {
         texture: Texture,
         light_dir: Vector3<f32>,
@@ -221,7 +217,7 @@ impl Shader for Material {
                 (Some(c1), Some(c2), Some(c3)) => c1.interpolate(&c2, &c3, &weights),
                 _ => Color::new(1.0, 1.0, 1.0, 1.0),
             },
-            Self::Textured(texture) => {
+            Self::Textured { texture } => {
                 if let Some(uv) = calculate_uvs(&triangle, &weights) {
                     if let Some(color) = texture.sample(&uv) {
                         color
@@ -241,14 +237,14 @@ impl Shader for Material {
                     Color::new(1.0, 1.0, 1.0, 1.0)
                 };
                 if let Some(normal) = calculate_normals(&triangle, &weights) {
-                    color = color.scalar_mul(Vector3::dot(&normal, &light_dir).max(0.01));
+                    color = color * Vector3::dot(&normal, &light_dir).max(0.01);
                 }
                 color
             }
             Self::LitSolid { color, light_dir } => {
                 let mut color = color.clone();
                 if let Some(normal) = calculate_normals(&triangle, &weights) {
-                    color = color.scalar_mul(Vector3::dot(&normal, &light_dir).max(0.01));
+                    color = color * Vector3::dot(&normal, &light_dir).max(0.01);
                 }
                 color
             }
@@ -260,41 +256,33 @@ pub fn clip_triangle(triangle: &[Vertex], camera: &Camera) -> Vec<Vertex> {
     let clip0 = triangle[0].position.z < camera.near;
     let clip1 = triangle[1].position.z < camera.near;
     let clip2 = triangle[2].position.z < camera.near;
-    let clipped_triangle = match [clip0,clip1,clip2] {
-        [true,true,true] => triangle.to_vec(),
+    let clipped_triangle = match [clip0, clip1, clip2] {
+        [true, true, true] => triangle.to_vec(),
         _ => Vec::new(),
     };
     clipped_triangle
 }
 
 pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, mode: &DrawMode) {
-    let mv_mat = camera.get_view_matrix() * entity.position.to_homogeneous() * entity.scale.to_homogeneous();
+    target.vertex_buffer.clear();
+    let mv_mat =
+        camera.get_view_matrix() * entity.position.to_homogeneous() * entity.scale.to_homogeneous();
     let p_mat = camera.get_perspective_matrix();
-    let screen_vertices: Vec<Vertex> = entity
-        .model
-        .vertices
-        .par_chunks(3)
-        .flat_map(|triangle| {
-            let view_space = triangle.iter().map(|v| v.model_to_view(&mv_mat)).collect::<Vec<_>>();
-            let view_space = clip_triangle(view_space.as_slice(),&camera);
-            let vertices: Vec<_> = view_space
-                .iter()
-                .map(|v| v.view_to_clip(&p_mat))
-                .map(|v| v.clip_to_ndc())
-                .map(|v| v.ndc_to_screen((target.width, target.height)))
-                .collect::<Vec<_>>();
 
-            let finished_v = vertices
-                .iter()
-                .map(|v| v.update_normal(&entity.position))
-                .collect::<Vec<_>>();
-            finished_v
-        })
-        .collect();
+    let mut vertices = &mut target.vertex_buffer;
+    vertices.extend_from_slice(entity.model.vertices.as_slice());
+    for vertex in vertices.iter_mut() {vertex.model_to_view_mut(&mv_mat);}
+    let mut vertices = vertices.chunks_mut(3).flat_map(|v| clip_triangle(v, &camera)).collect::<Vec<_>>();
+    for vertex in vertices.iter_mut() {
+        vertex.view_to_clip_mut(&p_mat).clip_to_ndc_mut()
+        .ndc_to_screen_mut((target.width, target.height))
+        .update_normal_mut(&entity.position);
+    }
+
     let color = Color::new(1.0, 1.0, 1.0, 1.0).as_u32();
     let size = 2.0;
     target.create_slices().par_iter_mut().for_each(|slice| {
-        for triangle in screen_vertices.as_slice().chunks_exact(3) {
+        for triangle in vertices.as_slice().chunks_exact(3) {
             if mode.shaded {
                 draw_triangle(slice, triangle, &entity.shader);
             }
@@ -313,25 +301,31 @@ pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, 
 }
 
 fn draw_triangle(slice: &mut RenderSlice, triangle: &[Vertex], shader: &Box<dyn Shader>) {
-    let bounds = Bounds::new(triangle,(slice.width,slice.height));
+    let bounds = Bounds::new(triangle, (slice.width, slice.height));
+
     for y in bounds.y_range() {
         if y < slice.start || y >= slice.end {
             continue;
         }
+        let mut in_triangle = false;
         for x in bounds.x_range() {
-            let (in_triangle, weights) =
-                point_in_triangle(&triangle, &Point2::new(x as f32, y as f32));
-            if in_triangle {
-                let (depth, _depths) = calculate_depths(triangle, &weights);
+            if point_in_triangle(&triangle, &Point2::new(x as f32, y as f32)) {
+                let current = triangle_barycentric(&triangle, &Point2::new(x as f32, y as f32));
+                in_triangle = true;
+                let depth = calculate_depths(triangle, &current);
                 // Adjust index to be relative to the slice
                 let idx = ((y - slice.start) * slice.width + x) as usize;
                 if idx < slice.color_slice.len() {
                     if depth > slice.depth_slice[idx] {
                         continue;
                     }
-                    let texture_color = shader.shade(triangle, &weights);
+                    let texture_color = shader.shade(triangle, &current);
                     slice.color_slice[idx] = texture_color.as_u32();
                     slice.depth_slice[idx] = depth;
+                }
+            } else {
+                if in_triangle == true {
+                    break; // if we entered then exited the triangle, skip the rest of this scanline.
                 }
             }
         }
