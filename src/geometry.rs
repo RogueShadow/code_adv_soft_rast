@@ -221,7 +221,7 @@ impl Bounds {
                 min_y: 0.0,
                 max_x: 0.0,
                 max_y: 0.0,
-            };
+            }
         }
 
         let first = points[0].clone();
@@ -236,7 +236,7 @@ impl Bounds {
             max_x = max_x.max(point.position.x);
             max_y = max_y.max(point.position.y);
         }
-
+        
         Self {
             min_x: min_x.max(0.0),
             min_y: min_y.max(0.0),
@@ -285,7 +285,6 @@ pub fn signed_area(a: &Point2<f32>, b: &Point2<f32>, c: &Point2<f32>) -> f32 {
     ac.dot(&ab_perp) / 2.0
 }
 
-#[inline(always)]
 pub fn perpendicular_vector(v: &Vector2<f32>) -> Vector2<f32> {
     Vector2::new(v.y, -v.x)
 }

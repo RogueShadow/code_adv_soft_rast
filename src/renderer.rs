@@ -1,6 +1,6 @@
 use crate::Entity;
 use crate::camera::Camera;
-use crate::geometry::{Bounds, Texture, Vertex, point_in_triangle, triangle_barycentric};
+use crate::geometry::{Bounds, Texture, Vertex, triangle_barycentric, edge_cross};
 use nalgebra::{Point2, Vector3};
 use rand::Rng;
 use rand_xorshift::XorShiftRng;
@@ -17,14 +17,6 @@ pub struct Color {
 impl Color {
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
-    }
-    pub fn mul(&self, other: &Self) -> Self {
-        Self {
-            r: self.r * other.r,
-            g: self.g * other.g,
-            b: self.b * other.b,
-            a: self.a * other.a,
-        }
     }
     pub fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self {
@@ -303,32 +295,68 @@ pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, 
 fn draw_triangle(slice: &mut RenderSlice, triangle: &[Vertex], shader: &Box<dyn Shader>) {
     let bounds = Bounds::new(triangle, (slice.width, slice.height));
 
+    // Extract 2D positions of vertices
+    let v0 = triangle[2].position.xy();
+    let v1 = triangle[1].position.xy();
+    let v2 = triangle[0].position.xy();
+
+    // Precompute deltas for each edge
+    let delta_x_0 = -(v1.y - v0.y); // Edge v0 to v1
+    let delta_y_0 = v1.x - v0.x;
+    let delta_x_1 = -(v2.y - v1.y); // Edge v1 to v2
+    let delta_y_1 = v2.x - v1.x;
+    let delta_x_2 = -(v0.y - v2.y); // Edge v2 to v0
+    let delta_y_2 = v0.x - v2.x;
+
+    // Starting pixel coordinates
+    let x_start = bounds.min_x as u32;
+    let y_start = bounds.min_y as u32;
+    let p_start = Point2::new(x_start as f32 + 0.5, y_start as f32 + 0.5);
+
+    // Initial edge function values at starting pixel center
+    let e0_start = edge_cross(&v0, &v1, &p_start);
+    let e1_start = edge_cross(&v1, &v2, &p_start);
+    let e2_start = edge_cross(&v2, &v0, &p_start);
+
+    // Base edge values, updated per row
+    let mut e0 = e0_start;
+    let mut e1 = e1_start;
+    let mut e2 = e2_start;
+
     for y in bounds.y_range() {
         if y < slice.start || y >= slice.end {
+            e0 += delta_y_0;
+            e1 += delta_y_1;
+            e2 += delta_y_2;
             continue;
         }
-        let mut in_triangle = false;
+
+        // Edge values for the current row
+        let mut e0_row = e0;
+        let mut e1_row = e1;
+        let mut e2_row = e2;
+
         for x in bounds.x_range() {
-            if point_in_triangle(&triangle, &Point2::new(x as f32, y as f32)) {
-                let current = triangle_barycentric(&triangle, &Point2::new(x as f32, y as f32));
-                in_triangle = true;
-                let depth = calculate_depths(triangle, &current);
-                // Adjust index to be relative to the slice
+            if e0_row >= 0.0 && e1_row >= 0.0 && e2_row >= 0.0 {
+                let p = Point2::new(x as f32 + 0.5, y as f32 + 0.5);
+                let weights = triangle_barycentric(triangle, &p);
+                let depth = calculate_depths(triangle, &weights);
                 let idx = ((y - slice.start) * slice.width + x) as usize;
-                if idx < slice.color_slice.len() {
-                    if depth > slice.depth_slice[idx] {
-                        continue;
-                    }
-                    let texture_color = shader.shade(triangle, &current);
+                if idx < slice.color_slice.len() && depth < slice.depth_slice[idx] {
+                    let texture_color = shader.shade(triangle, &weights);
                     slice.color_slice[idx] = texture_color.as_u32();
                     slice.depth_slice[idx] = depth;
                 }
-            } else {
-                if in_triangle == true {
-                    break; // if we entered then exited the triangle, skip the rest of this scanline.
-                }
             }
+            // Increment edge values for next x
+            e0_row += delta_x_0;
+            e1_row += delta_x_1;
+            e2_row += delta_x_2;
         }
+        // Increment edge values for next y
+        e0 += delta_y_0;
+        e1 += delta_y_1;
+        e2 += delta_y_2;
     }
 }
 fn draw_line(slice: &mut RenderSlice, p1: &Vertex, p2: &Vertex, color: u32) {
