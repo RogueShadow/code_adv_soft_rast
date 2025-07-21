@@ -6,7 +6,7 @@ mod renderer;
 use crate::camera::Camera;
 use crate::geometry::Model;
 use crate::my_app::MyApp;
-use crate::renderer::{DrawMode, Material, RenderTarget, Shader, draw_buffer};
+use crate::renderer::{DrawMode, Material, RenderTarget, Shader};
 use nalgebra::{Isometry3, Scale3};
 use softbuffer::{Context, Surface};
 use std::collections::HashSet;
@@ -15,14 +15,14 @@ use std::rc::Rc;
 use std::thread;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::dpi::{PhysicalSize, Size};
+use winit::dpi::{LogicalPosition, PhysicalSize, Position, Size};
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{CursorGrabMode, Window, WindowAttributes, WindowId};
 
-const WIDTH: f32 = 1600.0;
-const HEIGHT: f32 = 900.0;
+const WIDTH: f32 = 1600.0 / 1.5;
+const HEIGHT: f32 = 900.0 / 1.5;
 
 pub enum SoftRastEvent<'a> {
     Resume {},
@@ -128,6 +128,10 @@ impl ApplicationHandler for AppContext {
         if self.window.is_none() {
             let mut attributes = WindowAttributes::default();
             attributes.inner_size = Some(Size::new(PhysicalSize::new(WIDTH, HEIGHT)));
+            if let Some(monitor) = event_loop.primary_monitor() {
+                let (x,y) = (monitor.size().width / 2,monitor.size().height / 2);
+                attributes.position = Some(Position::from(LogicalPosition::new(x as f32 - WIDTH / 2. , y as f32 - HEIGHT / 2.)));
+            }
 
             let window = match event_loop.create_window(attributes) {
                 Ok(window) => Rc::new(window),
@@ -152,6 +156,7 @@ impl ApplicationHandler for AppContext {
                 eprintln!("{:?}", err);
             }
             window.set_cursor_visible(false);
+
 
             self.window = Some(window.clone());
             self.context = Some(context);
@@ -236,7 +241,7 @@ impl ApplicationHandler for AppContext {
                         );
                         let camera = &scene.camera;
                         for entity in &scene.entities {
-                            draw_buffer(target, &entity, camera, &self.draw_mode);
+                            target.draw(&entity, camera, &self.draw_mode);
                         }
                     } else {
                         self.scene = Some(Scene {

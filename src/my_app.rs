@@ -1,6 +1,7 @@
-use crate::geometry::{Model, Texture, load_model};
+use crate::geometry::{load_model, randomize_model_colors, Model, Texture, Vertex};
+use crate::renderer::Color;
 use crate::{Camera, Command, Entity, Material, SoftRastEvent, UserState};
-use nalgebra::{Isometry3, Point3, Scale3, Vector3};
+use nalgebra::{Isometry3, Point3, Scale3, Vector2, Vector3};
 
 pub struct MyApp {
     pub models: Vec<Model>,
@@ -53,14 +54,15 @@ impl UserState for MyApp {
                         ));
                     }
                     if let Some(model) = models.next() {
+                        let model = randomize_model_colors(model);
                         scene.entities.push(Entity::new(
                             "floor",
-                            model,
+                            &model,
                             &transform,
                             &Scale3::new(1.0, 1.0, 1.0),
-                            Material::LitTexture {
-                                texture: Texture::new("assets/Grass.png").unwrap(),
-                                light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize(),
+                            Material::VertexColors {
+                                // texture: Texture::new("assets/Grass.png").unwrap(),
+                                // light_dir: Vector3::<f32>::new(1.0, 1.0, 0.0).normalize(),
                             },
                         ))
                     }
@@ -155,7 +157,52 @@ impl UserState for MyApp {
                 self.models.push(load_model("assets/floor.obj"));
 
                 self.models.push(load_model("assets/Eevee.obj"));
+
+                load_gltf("assets/test.glb");
             }
         }
     }
+}
+
+pub fn load_gltf(path: &str) -> Vec<Model> {
+    let mut models = Vec::new();
+    let (gltf, buffers, _) = gltf::import(path).unwrap();
+    for scene in gltf.scenes() {
+        for node in scene.nodes() {
+            if let Some(mesh) = node.mesh() {
+                let mut vertices = Vec::<Vertex>::new();
+                for primitive in mesh.primitives() {
+                    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+
+                    let positions = if let Some(positions) = reader.read_positions() {
+                        positions.map(|p| Point3::new(p[0],p[1],p[2])).collect::<Vec<_>>()
+                    } else { Vec::new() };
+                    let normals = if let Some(normals) = reader.read_normals() {
+                        normals.map(|n| Vector3::new(n[0],n[1],n[2])).collect::<Vec<_>>()
+                    } else { Vec::new() };
+                    let texcoords = if let Some(texcoords) = reader.read_tex_coords(0) {
+                        texcoords.into_f32().map(|uv| Vector2::new(uv[0],uv[1])).collect::<Vec<_>>()
+                    } else { Vec::new() };
+                    let colors = if let Some(colors) = reader.read_colors(0) {
+                        colors.into_rgba_f32().map(|c| Color::new(c[0],c[1],c[2],c[3])).collect::<Vec<_>>()
+                    } else { Vec::new() };
+                    for (index,pos) in positions.iter().enumerate() {
+                        let mut vertex = Vertex::new(pos);
+                        if let Some(normal) = normals.get(index) {
+                            vertex.normal = Some(normal.to_owned());
+                        }
+                        if let Some(texcoords) = texcoords.get(index) {
+                            vertex.uv = Some(texcoords.to_owned());
+                        }
+                        if let Some(color) = colors.get(index) {
+                            vertex.color = Some(color.to_owned());
+                        }
+                        vertices.push(vertex);
+                    }
+                }
+                models.push(Model::from_vertices(vertices.as_slice()));
+            }
+        }
+    }
+    models
 }

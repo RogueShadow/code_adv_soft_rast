@@ -1,8 +1,10 @@
-use crate::renderer::Color;
+use crate::renderer::{random_color, Color};
 use image::{DynamicImage, GenericImageView, Rgba};
 use nalgebra::{Isometry3, Matrix4, Point2, Point3, Point4, Vector2, Vector3};
 use std::fs::read_to_string;
 use std::ops::RangeInclusive;
+use rand::SeedableRng;
+use rand_xorshift::XorShiftRng;
 
 #[derive(Debug, Clone)]
 pub struct Texture {
@@ -37,7 +39,7 @@ impl Texture {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Model {
     pub vertices: Vec<Vertex>,
 }
@@ -192,7 +194,7 @@ pub fn vertex_from_face(
     norm: &[Vector3<f32>],
     color: Option<Color>,
 ) -> Vertex {
-    let mut vertex = Vertex::new(pos[face.0 - 1]);
+    let mut vertex = Vertex::new(&pos[face.0 - 1]);
     if let Some(index) = face.1 {
         vertex = vertex.with_uv(uv[index - 1])
     }
@@ -251,12 +253,12 @@ impl Bounds {
         self.min_y as u32..=self.max_y as u32
     }
 }
-pub fn point_in_triangle(triangle: &[Vertex], p: &Point2<f32>) -> bool {
-    let edge1 = edge_cross(&triangle[0].position.xy(), &triangle[2].position.xy(), p);
-    let edge2 = edge_cross(&triangle[2].position.xy(), &triangle[1].position.xy(), p);
-    let edge3 = edge_cross(&triangle[1].position.xy(), &triangle[0].position.xy(), p);
-    edge1 >= 0.0 && edge2 >= 0.0 && edge3 >= 0.0
-}
+// pub fn point_in_triangle(triangle: &[Vertex], p: &Point2<f32>) -> bool {
+//     let edge1 = edge_cross(&triangle[0].position.xy(), &triangle[2].position.xy(), p);
+//     let edge2 = edge_cross(&triangle[2].position.xy(), &triangle[1].position.xy(), p);
+//     let edge3 = edge_cross(&triangle[1].position.xy(), &triangle[0].position.xy(), p);
+//     edge1 >= 0.0 && edge2 >= 0.0 && edge3 >= 0.0
+// }
 pub fn edge_cross(a: &Point2<f32>, b: &Point2<f32>, p: &Point2<f32>) -> f32 {
     let ab = b - a;
     let ap = p - a;
@@ -289,15 +291,16 @@ pub fn perpendicular_vector(v: &Vector2<f32>) -> Vector2<f32> {
     Vector2::new(v.y, -v.x)
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Vertex {
     pub position: Point4<f32>,
     pub normal: Option<Vector3<f32>>,
     pub color: Option<Color>,
     pub uv: Option<Vector2<f32>>,
 }
+#[allow(unused)]
 impl Vertex {
-    pub fn new(position: Point3<f32>) -> Self {
+    pub fn new(position: &Point3<f32>) -> Self {
         Self {
             position: position.to_homogeneous().into(),
             normal: None,
@@ -393,4 +396,12 @@ impl Vertex {
         }
         self
     }
+}
+pub fn randomize_model_colors(model: &Model) -> Model {
+    let mut model = model.clone();
+    let mut rng = XorShiftRng::from_os_rng();
+    for vertex in model.vertices.iter_mut() {
+        vertex.color = Some(random_color(&mut rng));
+    }
+    model
 }

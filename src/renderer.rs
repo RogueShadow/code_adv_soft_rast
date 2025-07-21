@@ -135,6 +135,9 @@ impl RenderTarget {
         }
         slices
     }
+    pub fn draw(&mut self, entity: &Entity, camera: &Camera, mode: &DrawMode) {
+        draw_buffer(self, entity, camera, mode);
+    }
 }
 fn calculate_uvs(triangle: &[Vertex], weights: &Vector3<f32>) -> Option<Point2<f32>> {
     let uv0 = triangle[0].uv?;
@@ -182,6 +185,7 @@ pub struct RenderSlice<'a> {
     height: u32,
 }
 
+#[allow(unused)]
 pub enum Material {
     SolidColor(Color),
     VertexColors,
@@ -248,11 +252,9 @@ pub fn clip_triangle(triangle: &[Vertex], camera: &Camera) -> Vec<Vertex> {
     let clip0 = triangle[0].position.z < camera.near;
     let clip1 = triangle[1].position.z < camera.near;
     let clip2 = triangle[2].position.z < camera.near;
-    let clipped_triangle = match [clip0, clip1, clip2] {
-        [true, true, true] => triangle.to_vec(),
-        _ => Vec::new(),
-    };
-    clipped_triangle
+    if !clip0 || !clip1 || !clip2 {return Vec::new();}
+
+    triangle.to_vec()
 }
 
 pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, mode: &DrawMode) {
@@ -261,7 +263,7 @@ pub fn draw_buffer(target: &mut RenderTarget, entity: &Entity, camera: &Camera, 
         camera.get_view_matrix() * entity.position.to_homogeneous() * entity.scale.to_homogeneous();
     let p_mat = camera.get_perspective_matrix();
 
-    let mut vertices = &mut target.vertex_buffer;
+    let vertices = &mut target.vertex_buffer;
     vertices.extend_from_slice(entity.model.vertices.as_slice());
     for vertex in vertices.iter_mut() {vertex.model_to_view_mut(&mv_mat);}
     let mut vertices = vertices.chunks_mut(3).flat_map(|v| clip_triangle(v, &camera)).collect::<Vec<_>>();
